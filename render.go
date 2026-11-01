@@ -1,0 +1,300 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html"
+	"os"
+	"sort"
+	"strings"
+)
+
+type JStage struct {
+	Name string `json:"n"`
+	Kind string `json:"k"`
+	Role string `json:"r,omitempty"`
+	File string `json:"f,omitempty"`
+	Line int    `json:"l,omitempty"`
+	Doc  string `json:"d,omitempty"`
+	Pkg  string `json:"p,omitempty"`
+	Ext  string `json:"x,omitempty"`
+	K    string `json:"fk,omitempty"`
+}
+
+type JRoute struct {
+	M     string   `json:"m"`
+	P     string   `json:"p"`
+	F     string   `json:"f"`
+	L     int      `json:"l"`
+	Chain []JStage `json:"ch"`
+	Doc   *JDoc    `json:"doc,omitempty"`
+}
+
+// JFunc is one node of the code graph: enough to draw its flow and its body.
+type JFunc struct {
+	Name  string `json:"n"`
+	Pkg   string `json:"p,omitempty"`
+	File  string `json:"f,omitempty"`
+	Line  int    `json:"l,omitempty"`
+	Doc   string `json:"d,omitempty"`
+	Src   string `json:"s,omitempty"`
+	Steps []Step `json:"flow,omitempty"`
+}
+
+type JStats struct {
+	Routes     int `json:"routes"`
+	Groups     int `json:"groups"`
+	Middleware int `json:"middleware"`
+	Documented int `json:"documented"`
+	Packages   int `json:"packages"`
+	Funcs      int `json:"funcs"`
+}
+
+type JData struct {
+	Repo   string                  `json:"repo"`
+	Mod    string                  `json:"mod"`
+	Stats  JStats                  `json:"stats"`
+	Routes []JRoute                `json:"routes"`
+	Flows  map[string]JFunc        `json:"flows"`
+	Timing map[string]JRouteTiming `json:"timing,omitempty"`
+}
+
+func buildData(m *Module, routes []*Route) JData {
+	d := JData{Repo: baseName(m.Root), Mod: m.Path, Flows: map[string]JFunc{}}
+	groups := map[string]bool{}
+	mw := map[string]bool{}
+
+	for _, r := range routes {
+		groups[r.Group] = true
+		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line}
+		for _, ref := range r.Chain {
+			st := JStage{Name: ref.Name, Kind: ref.Kind, Role: ref.Role, Line: ref.Line}
+			if ref.File != nil {
+				st.File = ref.File.Rel
+			}
+			if ref.Fn != nil {
+				st.Doc = displayDoc(ref.Fn)
+				st.Pkg = altPkg(ref.Fn.PkgPath)
+				if ref.Fn.PkgPath != "" && !strings.HasPrefix(ref.Fn.PkgPath, m.Path) {
+					st.Ext = ref.Fn.PkgPath
+				}
+				st.K = ref.Fn.Key
+				indexFunc(d.Flows, ref.Fn, 0)
+			}
+			if ref.Role == "middleware" {
+				mw[ref.Name] = true
+			}
+			jr.Chain = append(jr.Chain, st)
+		}
+		for _, st := range jr.Chain {
+			if st.Role == "handler" && st.Doc != "" {
+				d.Stats.Documented++
+				break
+			}
+		}
+		jr.Doc = buildDoc(m, r)
+		d.Routes = append(d.Routes, jr)
+	}
+	sort.SliceStable(d.Routes, func(i, j int) bool {
+		if d.Routes[i].P != d.Routes[j].P {
+			return d.Routes[i].P < d.Routes[j].P
+		}
+		return d.Routes[i].M < d.Routes[j].M
+	})
+
+	d.Stats.Routes = len(d.Routes)
+	d.Stats.Groups = len(groups)
+	d.Stats.Middleware = len(mw)
+	d.Stats.Packages = len(m.PKG)
+	d.Stats.Funcs = len(d.Flows)
+	return d
+}
+
+const flowLimit = 1400
+const flowDepth = 3
+
+// indexFunc bakes a function's flow and its callees, so every click is local.
+func indexFunc(flows map[string]JFunc, fn *Func, depth int) {
+	if fn == nil || fn.Key == "" || len(flows) >= flowLimit {
+		return
+	}
+	file := ""
+	if fn.File != nil {
+		file = fn.File.Rel
+	}
+	if _, seen := flows[fn.Key]; seen {
+		return
+	}
+	flows[fn.Key] = JFunc{
+		Name:  fnName(fn),
+		Pkg:   altPkg(fn.PkgPath),
+		File:  file,
+		Line:  fn.Start,
+		Doc:   displayDoc(fn),
+		Src:   snippet(fn, 120),
+		Steps: buildFlow(fn),
+	}
+	if depth >= flowDepth {
+		return
+	}
+	for _, c := range fn.Calls {
+		if c.Target != nil {
+			indexFunc(flows, c.Target, depth+1)
+		}
+	}
+}
+
+func fnName(fn *Func) string {
+	if fn.Recv != "" {
+		return fn.Recv + "." + fn.Name
+	}
+	return fn.Name
+}
+
+// plumbing is the framework chatter around a handler, not a service it uses.
+func plumbing(c Call) bool {
+	if c.Target != nil || c.PkgPath != "" {
+		return false
+	}
+	switch c.Base {
+	case "c", "ctx", "err", "ok", "w", "r", "req", "res", "fiber", "gin":
+		segs := strings.Split(c.Expr, ".")
+		return len(segs) == 2 || strings.Contains(c.Expr, "()")
+	}
+	switch c.Sel {
+	case "Error", "String", "Unwrap", "Errorf":
+		return true
+	}
+	return false
+}
+
+func displayDoc(f *Func) string {
+	if f == nil || f.Doc == "" {
+		return ""
+	}
+	d := f.Doc
+	if !strings.Contains(d, "@") {
+		return strings.Join(strings.Fields(d), " ")
+	}
+	sum := fieldOf(d, "@Summary ")
+	desc := fieldOf(d, "@Description ")
+	out := sum
+	if desc != "" {
+		if out != "" {
+			out += " — "
+		}
+		out += desc
+	}
+	if out == "" {
+		out = strings.Join(strings.Fields(d), " ")
+	}
+	return out
+}
+
+func fieldOf(doc, key string) string {
+	i := strings.Index(doc, key)
+	if i < 0 {
+		return ""
+	}
+	rest := doc[i+len(key):]
+	if j := strings.Index(rest, "\n@"); j >= 0 {
+		rest = rest[:j]
+	}
+	if j := strings.Index(rest, " @"); j >= 0 {
+		rest = rest[:j]
+	}
+	return strings.TrimSpace(strings.Join(strings.Fields(rest), " "))
+}
+
+func tagOf(c Call) string {
+	switch c.Base {
+	case "DB", "db", "gorm", "Mongo", "mongo", "MongoClient":
+		return "db"
+	case "Redis", "redis", "Valkey", "valkey", "Cache", "cache", "Rdb", "rdb":
+		return "cache"
+	case "Client", "client", "HTTP", "http", "Grpc", "grpc":
+		return "net"
+	}
+	switch c.Sel {
+	case "Table", "Model", "Where", "Joins", "First", "Find", "Select", "Create", "Save", "Updates", "Delete", "Exec", "Raw", "Query":
+		return "db"
+	}
+	return ""
+}
+
+func snippet(fn *Func, maxLines int) string {
+	if fn == nil || fn.File == nil || fn.Start <= 0 {
+		return ""
+	}
+	lines := fn.File.Lines
+	start := fn.Start
+	end := fn.End
+	if end <= 0 || end > len(lines) {
+		end = len(lines)
+	}
+	truncated := false
+	if end-start+1 > maxLines {
+		end = start + maxLines - 1
+		truncated = true
+	}
+	if start-1 >= len(lines) {
+		return ""
+	}
+	out := strings.Join(lines[start-1:end], "\n")
+	if truncated {
+		out += "\n// …"
+	}
+	return out
+}
+
+func baseName(p string) string {
+	parts := strings.Split(strings.TrimRight(p, "/"), "/")
+	return parts[len(parts)-1]
+}
+
+// writeJSON writes the same data the page bakes in, for the dev UI.
+func writeJSON(path string, d JData) error {
+	blob, err := json.MarshalIndent(d, "", " ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, blob, 0o644)
+}
+
+func writeHTML(path string, d JData) error {
+	blob, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	if shellHTML == "" {
+		return errors.New("ui/dist/index.html is missing: run `npm install && npm run build` in ui/")
+	}
+	page := strings.Replace(shellHTML, "</body>",
+		`<script id="synoptic-data" type="application/json">`+string(blob)+`</script></body>`, 1)
+	page = strings.Replace(page, "<title>route synoptic</title>", "<title>"+html.EscapeString(d.Repo)+" route synoptic</title>", 1)
+	if err := os.MkdirAll(dirOf(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(page), 0o644)
+}
+
+func dirOf(p string) string {
+	if i := strings.LastIndex(p, "/"); i > 0 {
+		return p[:i]
+	}
+	return "."
+}
+
+func report(d JData, out string) {
+	fmt.Printf("%s\n", d.Repo)
+	fmt.Printf("  routes     %d\n", d.Stats.Routes)
+	fmt.Printf("  groups     %d\n", d.Stats.Groups)
+	fmt.Printf("  middleware %d\n", d.Stats.Middleware)
+	fmt.Printf("  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
+	fmt.Printf("  flows baked                  %d functions\n", d.Stats.Funcs)
+	fmt.Printf("  written to %s\n", out)
+}

@@ -1,0 +1,14 @@
+# build output
+/synoptic
+/out/
+*.html
+
+# generated data
+ui/public/synoptic.json
+
+# ui
+ui/node_modules/
+ui/dist/
+
+# editors / os
+.DS_Store

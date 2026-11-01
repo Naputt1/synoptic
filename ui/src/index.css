@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #071417;
+  --color-panel: #0b1e23;
+  --color-panel2: #0e262c;
+  --color-line: #1d3b41;
+  --color-line2: #2b535b;
+  --color-ink: #d3e6e2;
+  --color-mut: #7d9c99;
+  --color-faint: #4e6c69;
+  --color-acc: #58e0b7;
+  --color-warn: #e0a33e;
+  --color-bad: #e06a6a;
+  --color-info: #9fc6ff;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 6px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-acc) 30%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line2) transparent;
+}
+
+.grid-bg {
+  background-image: radial-gradient(circle, rgb(120 190 175 / 0.13) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* react flow, dressed to match the canvas */
+.react-flow {
+  background: transparent;
+  --xy-edge-stroke: var(--color-line2);
+  --xy-edge-stroke-width: 1;
+  --xy-connectionline-stroke: var(--color-acc);
+}
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.react-flow__node {
+  font-family: var(--font-mono);
+}
+.react-flow__controls {
+  box-shadow: none;
+}
+.react-flow__controls-button {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-bottom: 0;
+  color: var(--color-mut);
+  fill: currentColor;
+}
+.react-flow__controls-button:hover {
+  background: var(--color-panel2);
+}
+.react-flow__controls-button:last-child {
+  border-bottom: 1px solid var(--color-line);
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sheet-content {
+  animation: sheetIn 0.22s cubic-bezier(0.22, 0.7, 0.3, 1);
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.sheet-overlay {
+  animation: fadeIn 0.16s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-content,
+  .sheet-overlay {
+    animation: none;
+  }
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+.edge-live {
+  stroke-dasharray: 4 6;
+  animation: dash 0.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edge-live {
+    animation: none;
+  }
+}
+
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-acc) 60%, transparent);
+  outline-offset: 2px;
+}
