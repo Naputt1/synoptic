@@ -12,3 +12,5 @@ ui/dist/
 
 # editors / os
 .DS_Store
+
+.openchamber
