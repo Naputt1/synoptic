@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from 'motion/react'
 import { memo } from 'react'
 import type { SData, SNode } from './scenes'
 import { statusBadgeTone, statusTone, type StatusTone } from '../lib/status'
+import { CardMenu } from './NodeMenu'
 
 const returnTone: Record<StatusTone, { idle: string; done: string; cur: string; text: string; hover: string }> = {
   ok: {
@@ -127,24 +128,27 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
     const w = (d.w as number) ?? 380
     const wide = w >= 200
     return (
-      <motion.div
-        initial={reduce ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
-        style={{ width: w, height: (d.h as number) ?? 44 }}
-        role="button"
-        tabIndex={0}
-        aria-label={`${d.title} input group`}
-        className={`relative cursor-pointer rounded-[4px] border border-dashed bg-panel ${wide ? 'flex items-center justify-between gap-3 px-3' : 'px-2 py-1'} ${tone}`}
-        title={`${d.title} · ${access ?? ''}${d.sub ? ' · ' + d.sub : ''}`}
-      >
-        <Handle type="target" position={Position.Left} id="l" />
-        <Handle type="source" position={Position.Right} id="r" />
-        <Handle type="target" position={Position.Top} id="t" />
-        <Handle type="source" position={Position.Bottom} id="b" />
-        <div className="min-w-0 truncate text-[10.5px] leading-tight">{d.title}</div>
-        <div className={`truncate text-[8.5px] uppercase tracking-[0.08em] opacity-80 ${wide ? 'shrink-0' : 'mt-0.5'}`}>{d.sub}</div>
-      </motion.div>
+      <CardMenu data={d}>
+        <motion.div
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
+          style={{ width: w, height: (d.h as number) ?? 44 }}
+          role="button"
+          tabIndex={0}
+          aria-label={`${d.title} input group`}
+          className={`relative cursor-pointer rounded-[4px] border border-dashed bg-panel ${wide ? 'flex items-center justify-between gap-3 px-3' : 'px-2 py-1'} ${tone}`}
+          title={`${d.title} · ${access ?? ''}${d.sub ? ' · ' + d.sub : ''}`}
+          onContextMenu={(e) => e.stopPropagation()}
+        >
+          <Handle type="target" position={Position.Left} id="l" />
+          <Handle type="source" position={Position.Right} id="r" />
+          <Handle type="target" position={Position.Top} id="t" />
+          <Handle type="source" position={Position.Bottom} id="b" />
+          <div className="min-w-0 truncate text-[10.5px] leading-tight">{d.title}</div>
+          <div className={`truncate text-[8.5px] uppercase tracking-[0.08em] opacity-80 ${wide ? 'shrink-0' : 'mt-0.5'}`}>{d.sub}</div>
+        </motion.div>
+      </CardMenu>
     )
   }
 
@@ -152,37 +156,42 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
     const tone = returnTone[statusTone(d.badge as string | undefined)]
     const state = d.status === 'cur' ? tone.cur : d.status === 'done' ? tone.done : tone.idle
     return (
-      <motion.div
-        initial={reduce ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
-        style={{ width: (d.w as number) ?? 32, height: (d.h as number) ?? 32 }}
-        className={`relative ${clickable ? 'cursor-pointer' : ''}`}
-        title={d.title}
-      >
-        <Handle type="target" position={Position.Top} id="t" />
-        <Handle type="source" position={Position.Bottom} id="b" />
-        <Handle type="target" position={Position.Left} id="l" />
-        <Handle type="source" position={Position.Right} id="r" />
-        <Handle type="target" position={Position.Right} id="ri" style={{ top: '50%' }} />
-        <Handle type="source" position={Position.Left} id="lo" style={{ top: '50%' }} />
-        <div
-          className={`flex size-full items-center justify-center rounded-full border border-dashed transition-colors ${tone.hover} ${state}`}
+      <CardMenu data={d}>
+        <motion.div
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
+          style={{ width: (d.w as number) ?? 32, height: (d.h as number) ?? 32 }}
+          className={`relative ${clickable ? 'cursor-pointer' : ''}`}
+          title={d.title}
+          onContextMenu={(e) => e.stopPropagation()}
         >
-          <span className={`text-[10px] font-semibold leading-none tabular-nums ${tone.text}`}>{String(d.badge || '↩')}</span>
-        </div>
-      </motion.div>
+          <Handle type="target" position={Position.Top} id="t" />
+          <Handle type="source" position={Position.Bottom} id="b" />
+          <Handle type="target" position={Position.Left} id="l" />
+          <Handle type="source" position={Position.Right} id="r" />
+          <Handle type="target" position={Position.Right} id="ri" style={{ top: '50%' }} />
+          <Handle type="source" position={Position.Left} id="lo" style={{ top: '50%' }} />
+          <div
+            className={`flex size-full items-center justify-center rounded-full border border-dashed transition-colors ${tone.hover} ${state}`}
+          >
+            <span className={`text-[10px] font-semibold leading-none tabular-nums ${tone.text}`}>{String(d.badge || '↩')}</span>
+          </div>
+        </motion.div>
+      </CardMenu>
     )
   }
 
   return (
-    <motion.div
-      initial={reduce ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.24, delay: Math.min((d.index ?? 0) * 0.018, 0.5), ease: [0.22, 0.7, 0.3, 1] }}
-      style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
-      title={d.full}
-      className={[
+    <CardMenu data={d}>
+      <motion.div
+        initial={reduce ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.24, delay: Math.min((d.index ?? 0) * 0.018, 0.5), ease: [0.22, 0.7, 0.3, 1] }}
+        style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
+        title={d.full}
+        onContextMenu={(e) => e.stopPropagation()}
+        className={[
         'relative flex flex-col justify-center overflow-hidden rounded-[6px] border px-2.5 py-2 text-ink',
         isBanner
           ? 'border-dashed border-acc/35 bg-transparent text-acc/90'
@@ -276,7 +285,8 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           )}
         </div>
       )}
-    </motion.div>
+      </motion.div>
+    </CardMenu>
   )
 }
 

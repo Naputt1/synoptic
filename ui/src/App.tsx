@@ -299,6 +299,25 @@ function Shell() {
   const data = useData()
   const pb = usePB()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [toast, setToast] = useState<{ id: number; text: string; tone: 'ok' | 'bad' } | null>(null)
+
+  useEffect(() => {
+    let hide = 0
+    const onToast = (e: Event) => {
+      const detail = (e as CustomEvent<{ message: string; tone?: 'ok' | 'bad' }>).detail
+      setToast({ id: Date.now(), text: detail.message, tone: detail.tone ?? 'ok' })
+      window.clearTimeout(hide)
+      hide = window.setTimeout(() => setToast(null), 1800)
+    }
+    const onSearch = () => setSearchOpen(true)
+    window.addEventListener('synoptic:toast', onToast)
+    window.addEventListener('synoptic:search', onSearch)
+    return () => {
+      window.clearTimeout(hide)
+      window.removeEventListener('synoptic:toast', onToast)
+      window.removeEventListener('synoptic:search', onSearch)
+    }
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -306,6 +325,17 @@ function Shell() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setSearchOpen((v) => !v)
+        return
+      }
+      if (
+        document.querySelector(
+          '[data-slot="context-menu-content"], [data-slot="search-dialog"], [role="dialog"]',
+        )
+      ) {
+        if (e.key === 'Escape' && searchOpen) {
+          e.preventDefault()
+          setSearchOpen(false)
+        }
         return
       }
       if (typing) return
@@ -323,9 +353,9 @@ function Shell() {
         pb.playing ? pb.pause() : pb.play()
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [pb])
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [pb, searchOpen])
 
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -335,8 +365,20 @@ function Shell() {
         <Outlet />
       </div>
       <div className="pointer-events-none absolute bottom-2 left-4 text-[10px] text-faint">
-        click any box to open it · ← → steps · space plays · esc goes back · ⌘K searches
+        click any box to open it · right-click for actions · ← → steps · space plays · esc goes back · ⌘K searches
       </div>
+      {toast && (
+        <div
+          key={toast.id}
+          role="status"
+          aria-live="polite"
+          className={`toast-in pointer-events-none fixed inset-x-0 bottom-9 z-[70] mx-auto w-fit rounded-[5px] border px-3 py-1.5 text-[11px] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.9)] ${
+            toast.tone === 'bad' ? 'border-bad/45 bg-bad/10 text-bad' : 'border-line bg-panel2 text-ink'
+          }`}
+        >
+          {toast.text}
+        </div>
+      )}
       <SearchDialog data={data} open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   )

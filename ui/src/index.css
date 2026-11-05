@@ -113,6 +113,55 @@ body {
   }
 }
 
+@keyframes ctxIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ctxOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.ctx-menu[data-state='open'],
+.ctx-menu-sub[data-state='open'] {
+  animation: ctxIn 0.12s cubic-bezier(0.22, 0.7, 0.3, 1);
+}
+.ctx-menu[data-state='closed'],
+.ctx-menu-sub[data-state='closed'] {
+  animation: ctxOut 0.09s ease-in forwards;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.toast-in {
+  animation: toastIn 0.16s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-menu,
+  .ctx-menu-sub,
+  .toast-in {
+    animation: none;
+  }
+}
+
 @keyframes dash {
   to {
     stroke-dashoffset: -14;

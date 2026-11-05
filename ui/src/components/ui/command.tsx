@@ -74,7 +74,11 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]" onMouseDown={() => onOpenChange(false)}>
+    <div
+      data-slot="search-dialog"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]"
+      onMouseDown={() => onOpenChange(false)}
+    >
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[1px]" />
       <Cmdk
         shouldFilter={false}

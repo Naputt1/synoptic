@@ -164,6 +164,8 @@ export function buildFlowScene(
         line: s.l,
         lines: s.ls && s.ls.length > 1 ? s.ls : s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,
+        file: s.f ?? flow.f,
+        source: true,
       }),
     )
     place(id, col, y, SPINE_W, CARD_H, kind)
@@ -184,6 +186,8 @@ export function buildFlowScene(
         line: s.l,
         lines: s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,
+        file: s.f ?? flow.f,
+        source: true,
       }, RET_W, RET_W),
     )
     place(id, RAIL_X, y + RET_DY, RET_W, RET_W, 'return')
@@ -351,6 +355,8 @@ export function buildFlowScene(
           line: g.line,
           lines: g.lines,
           startLine,
+          file: g.file || flow.f,
+          source: true,
         }, SPINE_W, INPUT_H),
       )
       place(id, x, y, SPINE_W, INPUT_H, 'input')

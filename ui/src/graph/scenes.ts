@@ -30,6 +30,17 @@ export type SData = {
   status?: Status
   tags?: string[]
   href?: string
+  /** source file, line(s) and start line for the source sheet */
+  file?: string
+  line?: number
+  lines?: number[]
+  startLine?: number
+  /** true when the current view can open the source sheet from a card */
+  source?: boolean
+  /** request context carried by route-shaped cards */
+  path?: string
+  method?: string
+  curl?: string
   /** trace overlay: formatted duration for this node */
   ms?: string
   /** trace overlay: 0..1 share of the route's summed time */
@@ -104,6 +115,11 @@ export function buildRouterScene(d: Data, focus: string): Scene {
           badge: r.m,
           sub: `${r.ch.length} ${r.ch.length === 1 ? 'step' : 'steps'}`,
           href: routeHref(ri),
+          path: r.p,
+          method: r.m,
+          curl: r.doc?.curl,
+          file: r.f,
+          line: r.l,
         }, 176, 58),
       )
     }
@@ -290,6 +306,11 @@ export function buildPipelineScene(
       sub: `${r.m} ${r.p}`,
       index: 0,
       status: status(0),
+      path: r.p,
+      method: r.m,
+      curl: r.doc?.curl,
+      file: r.f,
+      line: r.l,
     }, 380, 66),
   )
   y += gap
@@ -312,6 +333,11 @@ export function buildPipelineScene(
         href: stageHref(ri, i),
         ms: t ? msOf(t.m) : undefined,
         share: t?.sh,
+        file: st.f,
+        line: st.l,
+        path: r.p,
+        method: r.m,
+        curl: r.doc?.curl,
       }, 380, 76),
     )
     edges.push(edge(i === 0 ? 'in' : 's' + (i - 1), id, status(i + 1) === 'cur'))
