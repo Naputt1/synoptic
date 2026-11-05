@@ -20,10 +20,10 @@ import { Sheet } from './components/ui/sheet'
 import { SceneCanvas } from './graph/SceneCanvas'
 import { buildPipelineScene, buildRouterScene, type Scene } from './graph/scenes'
 import { buildFlowScene } from './graph/flowscene'
-import { DocPanel } from './panes/DocPanel'
+import { DocPanel, Inputs } from './panes/DocPanel'
 import { flowOf, loadData, msOf, routeHref, stageHref, timingOf, touchTags } from './lib/data'
 import { goto } from './lib/nav'
-import type { Call, Data, FuncFlow, Stage } from './lib/types'
+import type { Call, Data, FuncFlow, Stage, SynType } from './lib/types'
 
 /* ---------- data ---------- */
 
@@ -118,9 +118,32 @@ type Crumb = { label: string; href?: string }
 function useCrumbs(): Crumb[] {
   const data = useData()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const search = useSearch({ strict: false }) as { k?: string }
+  const search = useSearch({ strict: false }) as { k?: string; i?: string; t?: string; ri?: string; si?: string }
   const parts = pathname.split('/').filter(Boolean)
   const crumbs: Crumb[] = [{ label: data.repo, href: '/' }]
+
+  const routeChain = (ri: number, si?: number, skipStage?: string) => {
+    const r = data.routes[ri]
+    if (!r) return
+    const segs = r.p.split('/').filter(Boolean).slice(0, 2)
+    segs.forEach((s, i) => crumbs.push({ label: s, href: '/g/' + segs.slice(0, i + 1).join('/') }))
+    crumbs.push({ label: `${r.m} ${r.p}`, href: routeHref(ri) })
+    if (si !== undefined) {
+      const st = r.ch[si]
+      const same = st && (st.n === skipStage || Boolean(skipStage && skipStage.endsWith('.' + st.n)))
+      if (st && !same) {
+        const fk = (st.fk ?? '').split('|')
+        const self = fk.length >= 3 ? data.types?.[`${fk[0]}|${fk[1]}`] : undefined
+        const origin = `&ri=${ri}&si=${si}`
+        if (self) {
+          const impl = self.impls?.length === 1 ? data.types?.[self.impls[0]] : undefined
+          if (impl) crumbs.push({ label: impl.n, href: `/t?k=${encodeURIComponent(impl.key)}${origin}` })
+          crumbs.push({ label: self.n, href: `/t?k=${encodeURIComponent(self.key)}${origin}` })
+        }
+        crumbs.push({ label: st.n, href: stageHref(ri, si) })
+      }
+    }
+  }
 
   if (parts[0] === 'g') {
     const segs = parts.slice(1)
@@ -129,22 +152,38 @@ function useCrumbs(): Crumb[] {
 
   if (parts[0] === 'r') {
     const ri = Number(parts[1])
-    const r = data.routes[ri]
-    if (r) {
-      const segs = r.p.split('/').filter(Boolean).slice(0, 2)
-      segs.forEach((s, i) => crumbs.push({ label: s, href: '/g/' + segs.slice(0, i + 1).join('/') }))
-      crumbs.push({ label: `${r.m} ${r.p}`, href: routeHref(ri) })
-      if (parts[2] === 's') {
-        const si = Number(parts[3])
-        const st = r.ch[si]
-        if (st) crumbs.push({ label: st.n, href: stageHref(ri, si) })
-      }
+    routeChain(ri, parts[2] === 's' ? Number(parts[3]) : undefined)
+  }
+
+  if (parts[0] === 't') {
+    const key = search.k ?? ''
+    const iface = search.i ? data.types?.[search.i] : undefined
+    const self = data.types?.[key]
+    const ri = Number(search.ri ?? '')
+    const si = Number(search.si ?? '')
+    const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
+    if (Number.isFinite(ri) && data.routes[ri]) {
+      routeChain(ri, Number.isFinite(si) ? si : undefined)
     }
+    if (iface) crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
+    if (self) crumbs.push({ label: self.n, href: `/t?k=${encodeURIComponent(self.key)}${search.i ? `&i=${encodeURIComponent(search.i)}` : ''}${origin}` })
   }
 
   if (parts[0] === 'f') {
     const f = data.flows[search.k ?? '']
-    if (f) crumbs.push({ label: f.n, href: '#' })
+    const iface = search.i ? data.types?.[search.i] : undefined
+    const st = search.t ? data.types?.[search.t] : undefined
+    // keep the route and stage that opened this function, so back navigation
+    // has the whole chain instead of restarting at the repo
+    const ri = Number(search.ri ?? '')
+    const si = Number(search.si ?? '')
+    const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
+    if (Number.isFinite(ri) && data.routes[ri]) {
+      routeChain(ri, Number.isFinite(si) ? si : undefined, f?.n)
+    }
+    if (iface) crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
+    if (st) crumbs.push({ label: st.n, href: `/t?k=${encodeURIComponent(st.key)}${iface ? `&i=${encodeURIComponent(iface.key)}` : ''}${origin}` })
+    if (f && crumbs[crumbs.length - 1]?.label !== f.n) crumbs.push({ label: f.n, href: '#' })
   }
 
   return crumbs
@@ -439,6 +478,9 @@ function DetailSheet({
   src,
   calls,
   stage,
+  inputs,
+  focus,
+  focusLines,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -448,6 +490,9 @@ function DetailSheet({
   src?: string
   calls?: Call[]
   stage?: Stage
+  inputs?: Stage['in']
+  focus?: number
+  focusLines?: number[]
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={title} subtitle={subtitle}>
@@ -463,11 +508,12 @@ function DetailSheet({
           ))}
         </div>
       )}
+      {inputs && inputs.length > 0 && <Inputs items={inputs} />}
       {calls && calls.length > 0 && <CallsList calls={calls} />}
       {src ? (
         <div className="mt-4">
           <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">source</div>
-          <GoSource code={src} focus={FOCUS_LINE} />
+          <GoSource code={src} focus={focus} focusLines={focusLines} />
         </div>
       ) : (
         <p className="mt-4 text-[11px] italic text-faint">
@@ -522,7 +568,7 @@ function PipelineView() {
 
   const handler = r.ch[r.ch.length - 1]
   const mw = r.ch.filter((s) => (s.r ?? '') === 'middleware').length
-  const tags = [...new Set(r.ch.flatMap(touchTags))]
+  const tags = [...new Set(r.ch.flatMap((s) => touchTags(s, false)))]
   const current = sheet !== null ? r.ch[sheet] : undefined
   const flow = current?.fk ? flowOf(data, current.fk) : undefined
   const slow = timing && timing.slow >= 0 ? timing.st.find((x) => x.i === timing.slow) : undefined
@@ -567,6 +613,7 @@ function PipelineView() {
         src={current?.s ?? flow?.s}
         calls={current?.c}
         stage={current}
+        inputs={current?.in}
       />
     </GraphPage>
   )
@@ -583,16 +630,20 @@ function FlowView() {
   const flow = st?.fk ? flowOf(data, st.fk) : undefined
   const key = st?.fk ?? 'none'
   const nextStage = r && si + 1 < r.ch.length ? { label: r.ch[si + 1].n, href: '/r/' + ri + '/s/' + (si + 1) } : undefined
+  const prevStage = r && si > 0 ? { label: r.ch[si - 1].n, href: '/r/' + ri + '/s/' + (si - 1) } : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, pb.step, nextStage) : { nodes: [], edges: [], steps: 0, key: '' }),
-    [flow, key, pb.step, nextStage?.label, nextStage?.href],
+    () => (flow ? buildFlowScene(flow, key, pb.step, nextStage, prevStage, st?.in, { ri, si }) : { nodes: [], edges: [], steps: 0, key: '' }),
+    [flow, key, pb.step, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, st?.in, ri, si],
   )
   useSceneSteps(scene, 's' + ri + ':' + si)
   const [sheet, setSheet] = useState(false)
+  const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
     const onSrc = (e: Event) => {
-      const { line, startLine } = (e as CustomEvent<{ line: number; startLine?: number }>).detail
-      FOCUS_LINE = line - ((startLine ?? 1) - 1)
+      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>).detail
+      const offset = (detail.startLine ?? 1) - 1
+      const lines = detail.lines?.map((l) => l - offset)
+      setFocus({ line: lines?.[0] ?? detail.line - offset, lines })
       setSheet(true)
     }
     window.addEventListener('synoptic:source', onSrc)
@@ -618,11 +669,15 @@ function FlowView() {
             : undefined
         }
         tags={touchTags(st)}
-        onSource={() => setSheet(true)}
+        onSource={() => {
+          setFocus({})
+          setSheet(true)
+        }}
         sourceLabel="source"
       />
       }
     >
+      {st.in && st.in.length > 0 && <Inputs items={st.in} flush />}
       <DetailSheet
         open={sheet}
         onOpenChange={setSheet}
@@ -632,6 +687,9 @@ function FlowView() {
         src={st.s ?? flow?.s}
         calls={st.c}
         stage={st}
+        inputs={st.in}
+        focus={focus.line}
+        focusLines={focus.lines}
       />
     </GraphPage>
   )
@@ -640,19 +698,33 @@ function FlowView() {
 function FnView() {
   const data = useData()
   const pb = usePB()
-  const search = useSearch({ strict: false }) as { k?: string }
+  const search = useSearch({ strict: false }) as { k?: string; ri?: string; si?: string }
   const key = search.k ?? ''
   const flow: FuncFlow | undefined = flowOf(data, key)
+  const parentRi = Number(search.ri)
+  const parentSi = Number(search.si)
+  const parentOk = search.ri !== undefined && search.si !== undefined && Number.isInteger(parentRi) && Number.isInteger(parentSi)
+  const origin = parentOk ? { ri: parentRi, si: parentSi } : undefined
+  const parent = parentOk ? data.routes[parentRi] : undefined
+  const nextStage = parent && parentSi + 1 < parent.ch.length
+    ? { label: parent.ch[parentSi + 1].n, href: `/r/${parentRi}/s/${parentSi + 1}` }
+    : undefined
+  const prevStage = parent && parentSi > 0
+    ? { label: parent.ch[parentSi - 1].n, href: `/r/${parentRi}/s/${parentSi - 1}` }
+    : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, pb.step) : { nodes: [], edges: [], steps: 0, key: '' }),
-    [flow, key, pb.step],
+    () => (flow ? buildFlowScene(flow, key, pb.step, nextStage, prevStage, flow.in, origin) : { nodes: [], edges: [], steps: 0, key: '' }),
+    [flow, key, pb.step, flow?.in, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, parentOk, parentRi, parentSi],
   )
   useSceneSteps(scene, 'f' + key)
   const [sheet, setSheet] = useState(false)
+  const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
     const onSrc = (e: Event) => {
-      const { line, startLine } = (e as CustomEvent<{ line: number; startLine?: number }>).detail
-      FOCUS_LINE = line - ((startLine ?? 1) - 1)
+      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>).detail
+      const offset = (detail.startLine ?? 1) - 1
+      const lines = detail.lines?.map((l) => l - offset)
+      setFocus({ line: lines?.[0] ?? detail.line - offset, lines })
       setSheet(true)
     }
     window.addEventListener('synoptic:source', onSrc)
@@ -668,16 +740,160 @@ function FnView() {
       <ScopeCard
         title={flow.n}
         badge="func"
-        meta={flow.f ? `${flow.f}:${flow.l}` : key}
+        meta={flow.f ? `${flow.f}:${flow.l}${parent ? ` · ${parent.m} ${parent.p} · stage ${parentSi + 1}` : ''}` : key}
         doc={flow.d}
         note={!flow.d ? 'no doc comment on this one — the flow below is what it does' : undefined}
-        onSource={() => setSheet(true)}
+        onSource={() => {
+          setFocus({})
+          setSheet(true)
+        }}
         sourceLabel="source"
       />
       }
     >
-      <DetailSheet open={sheet} onOpenChange={setSheet} title={flow.n} subtitle={flow.f ? `${flow.f}:${flow.l}` : key} doc={flow.d} src={flow.s} />
+      {flow.in && flow.in.length > 0 && <Inputs items={flow.in} flush />}
+      <DetailSheet
+        open={sheet}
+        onOpenChange={setSheet}
+        title={flow.n}
+        subtitle={flow.f ? `${flow.f}:${flow.l}` : key}
+        doc={flow.d}
+        src={flow.s}
+        inputs={flow.in}
+        focus={focus.line}
+        focusLines={focus.lines}
+      />
     </GraphPage>
+  )
+}
+
+/* ---------- types ---------- */
+
+function TypeView() {
+  const data = useData()
+  const search = useSearch({ strict: false }) as { k?: string; i?: string; ri?: string; si?: string }
+  const key = search.k ?? ''
+  const t: SynType | undefined = data.types?.[key]
+  if (!t) return <div className="p-6 text-[12px] text-faint">this type is not in the module</div>
+  const iface = search.i ? data.types?.[search.i] : undefined
+  const ri = Number(search.ri ?? '')
+  const si = Number(search.si ?? '')
+  const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
+  const openMethod = (mk?: string) => {
+    if (!mk) return
+    const sk = t.k === 'struct' ? t.key : undefined
+    const ik = t.k === 'interface' ? t.key : iface?.key
+    const q = [`k=${encodeURIComponent(mk)}`]
+    if (ik) q.push(`i=${encodeURIComponent(ik)}`)
+    if (sk) q.push(`t=${encodeURIComponent(sk)}`)
+    goto(`/f?${q.join('&')}${origin}`)
+  }
+  // resolve a field's written type back to a catalog entry, so fields with a
+  // struct or interface type can be opened like methods
+  const fieldType = (raw: string): SynType | undefined => {
+    const norm = raw.replace(/^\*+/, '').trim()
+    const base = norm.match(/([A-Za-z_]\w*)$/)?.[1]
+    if (!base) return undefined
+    const qual = norm.includes('.') ? norm.slice(0, norm.lastIndexOf('.')).split('.').pop() : ''
+    if (qual) {
+      return Object.values(data.types ?? {}).find((x) => x.n === base && (x.pkg === qual || x.pkg.endsWith('/' + qual)))
+    }
+    const same = data.types?.[`${t.pkg}|${base}`]
+    if (same) return same
+    const matches = Object.values(data.types ?? {}).filter((x) => x.n === base)
+    return matches.length === 1 ? matches[0] : undefined
+  }
+  return (
+    <div className="flex h-full flex-col overflow-auto">
+      <ScopeCard
+        title={t.n}
+        badge={t.k}
+        meta={t.f ? `${t.f}:${t.l ?? 1}` : t.pkg}
+        note={t.k === 'interface' ? 'interface · implemented by the structs below' : 'struct · fields and methods'}
+      />
+      <div className="grid gap-3 p-4 lg:grid-cols-2">
+        {t.k === 'struct' && (
+          <section className="rounded-[6px] border border-line bg-panel/40">
+            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">fields</div>
+            <div className="divide-y divide-line/60">
+              {(t.fields ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no fields</div>}
+              {(t.fields ?? []).map((f) => {
+                const ft = fieldType(f.t)
+                return (
+                  <button
+                    key={f.n + f.t}
+                    disabled={!ft}
+                    onClick={() => ft && goto(`/t?k=${encodeURIComponent(ft.key)}${origin}`)}
+                    className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${ft ? 'hover:bg-panel2' : 'cursor-default'}`}
+                  >
+                    <span className="text-ink">{f.n}</span>
+                    <span className="truncate text-info">{f.t}</span>
+                    {f.e && <span className="text-[9px] uppercase tracking-[0.1em] text-faint">embedded</span>}
+                    {ft && <span className="ml-auto shrink-0 text-[9px] text-faint">open ›</span>}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+        <section className="rounded-[6px] border border-line bg-panel/40">
+          <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">methods</div>
+          <div className="divide-y divide-line/60">
+            {(t.methods ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no methods</div>}
+            {(t.methods ?? []).map((m) => (
+              <button
+                key={m.n + (m.k ?? '')}
+                disabled={!m.k}
+                onClick={() => openMethod(m.k)}
+                className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${m.k ? 'hover:bg-panel2' : 'cursor-default'}`}
+              >
+                <span className="text-ink">{m.n}</span>
+                <span className="min-w-0 flex-1 truncate text-mut">{m.sig}</span>
+                {m.k && <span className="shrink-0 text-[9px] text-faint">open ›</span>}
+              </button>
+            ))}
+          </div>
+        </section>
+        {t.k === 'interface' && (
+          <section className="rounded-[6px] border border-line bg-panel/40">
+            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">implemented by</div>
+            <div className="divide-y divide-line/60">
+              {(t.impls ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no in-module implementation</div>}
+              {(t.impls ?? []).map((ik) => {
+                const it = data.types?.[ik]
+                if (!it) return null
+                return (
+                  <button key={ik} onClick={() => goto(`/t?k=${encodeURIComponent(ik)}&i=${encodeURIComponent(t.key)}${origin}`)}
+                    className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-panel2">
+                    <span className="text-ink">{it.n}</span>
+                    <span className="min-w-0 flex-1 truncate text-mut">{it.pkg}</span>
+                    <span className="text-[9px] text-faint">open ›</span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+        {t.k === 'struct' && (t.impls ?? []).length > 0 && (
+          <section className="rounded-[6px] border border-line bg-panel/40">
+            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">implements</div>
+            <div className="divide-y divide-line/60">
+              {(t.impls ?? []).map((ik) => {
+                const it = data.types?.[ik]
+                if (!it) return null
+                return (
+                  <button key={ik} onClick={() => goto(`/t?k=${encodeURIComponent(ik)}${origin}`)}
+                    className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-panel2">
+                    <span className="text-ink">{it.n}</span>
+                    <span className="min-w-0 flex-1 truncate text-mut">{it.pkg}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -689,12 +905,12 @@ const groupRoute = createRoute({ getParentRoute: () => rootRoute, path: '/g/$', 
 const routeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/r/$ri', component: PipelineView })
 const stageRoute = createRoute({ getParentRoute: () => rootRoute, path: '/r/$ri/s/$si', component: FlowView })
 const fnRoute = createRoute({ getParentRoute: () => rootRoute, path: '/f', component: FnView })
+const typeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/t', component: TypeView })
 
-const routeTree = rootRoute.addChildren([indexRoute, groupRoute, routeRoute, stageRoute, fnRoute])
+const routeTree = rootRoute.addChildren([indexRoute, groupRoute, routeRoute, stageRoute, fnRoute, typeRoute])
 
 const router = createRouter({ routeTree, history: createHashHistory() })
 
-let FOCUS_LINE: number | undefined
 export function App() {
   return <RouterProvider router={router} />
 }

@@ -11,15 +11,16 @@ import (
 )
 
 type JStage struct {
-	Name string `json:"n"`
-	Kind string `json:"k"`
-	Role string `json:"r,omitempty"`
-	File string `json:"f,omitempty"`
-	Line int    `json:"l,omitempty"`
-	Doc  string `json:"d,omitempty"`
-	Pkg  string `json:"p,omitempty"`
-	Ext  string `json:"x,omitempty"`
-	K    string `json:"fk,omitempty"`
+	Name string   `json:"n"`
+	Kind string   `json:"k"`
+	Role string   `json:"r,omitempty"`
+	File string   `json:"f,omitempty"`
+	Line int      `json:"l,omitempty"`
+	Doc  string   `json:"d,omitempty"`
+	Pkg  string   `json:"p,omitempty"`
+	Ext  string   `json:"x,omitempty"`
+	K    string   `json:"fk,omitempty"`
+	In   []JInput `json:"in,omitempty"`
 }
 
 type JRoute struct {
@@ -33,13 +34,14 @@ type JRoute struct {
 
 // JFunc is one node of the code graph: enough to draw its flow and its body.
 type JFunc struct {
-	Name  string `json:"n"`
-	Pkg   string `json:"p,omitempty"`
-	File  string `json:"f,omitempty"`
-	Line  int    `json:"l,omitempty"`
-	Doc   string `json:"d,omitempty"`
-	Src   string `json:"s,omitempty"`
-	Steps []Step `json:"flow,omitempty"`
+	Name  string   `json:"n"`
+	Pkg   string   `json:"p,omitempty"`
+	File  string   `json:"f,omitempty"`
+	Line  int      `json:"l,omitempty"`
+	Doc   string   `json:"d,omitempty"`
+	Src   string   `json:"s,omitempty"`
+	Steps []Step   `json:"flow,omitempty"`
+	In    []JInput `json:"in,omitempty"`
 }
 
 type JStats struct {
@@ -57,6 +59,7 @@ type JData struct {
 	Stats  JStats                  `json:"stats"`
 	Routes []JRoute                `json:"routes"`
 	Flows  map[string]JFunc        `json:"flows"`
+	Types  map[string]JType        `json:"types,omitempty"`
 	Timing map[string]JRouteTiming `json:"timing,omitempty"`
 }
 
@@ -80,7 +83,8 @@ func buildData(m *Module, routes []*Route) JData {
 					st.Ext = ref.Fn.PkgPath
 				}
 				st.K = ref.Fn.Key
-				indexFunc(d.Flows, ref.Fn, 0)
+				st.In = analyzeStageInputs(m, ref.Fn, r.Path)
+				indexFunc(m, d.Flows, ref.Fn, 0)
 			}
 			if ref.Role == "middleware" {
 				mw[ref.Name] = true
@@ -107,6 +111,11 @@ func buildData(m *Module, routes []*Route) JData {
 	d.Stats.Groups = len(groups)
 	d.Stats.Middleware = len(mw)
 	d.Stats.Packages = len(m.PKG)
+	d.Types = buildTypeCatalog(m)
+	for key, jf := range d.Flows {
+		annotateSteps(jf.Steps, d.Types)
+		d.Flows[key] = jf
+	}
 	d.Stats.Funcs = len(d.Flows)
 	return d
 }
@@ -115,7 +124,7 @@ const flowLimit = 1400
 const flowDepth = 3
 
 // indexFunc bakes a function's flow and its callees, so every click is local.
-func indexFunc(flows map[string]JFunc, fn *Func, depth int) {
+func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 	if fn == nil || fn.Key == "" || len(flows) >= flowLimit {
 		return
 	}
@@ -134,13 +143,14 @@ func indexFunc(flows map[string]JFunc, fn *Func, depth int) {
 		Doc:   displayDoc(fn),
 		Src:   snippet(fn, 120),
 		Steps: buildFlow(fn),
+		In:    analyzeStageInputs(m, fn, ""),
 	}
 	if depth >= flowDepth {
 		return
 	}
 	for _, c := range fn.Calls {
 		if c.Target != nil {
-			indexFunc(flows, c.Target, depth+1)
+			indexFunc(m, flows, c.Target, depth+1)
 		}
 	}
 }
@@ -207,7 +217,28 @@ func fieldOf(doc, key string) string {
 	return strings.TrimSpace(strings.Join(strings.Fields(rest), " "))
 }
 
+func isAuthReceiver(s string) bool {
+	return strings.Contains(strings.ToLower(s), "authenticator")
+}
+
+func isServiceReceiver(s string) bool {
+	s = strings.ToLower(s)
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '.' || r == '_' || r == '*' || r == ' ' }) {
+		switch part {
+		case "service", "services", "svc", "usecase", "usecases", "repo", "repository":
+			return true
+		}
+	}
+	return strings.Contains(s, "servicelayer")
+}
+
 func tagOf(c Call) string {
+	if isServiceReceiver(c.Expr) {
+		return "service"
+	}
+	if isAuthReceiver(c.Expr) {
+		return "auth"
+	}
 	switch c.Base {
 	case "DB", "db", "gorm", "Mongo", "mongo", "MongoClient":
 		return "db"

@@ -10,6 +10,9 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  server: {
+    allowedHosts: ['.synoptic'],
+  },
   build: {
     outDir: 'dist',
     cssCodeSplit: false,

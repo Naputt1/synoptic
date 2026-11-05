@@ -29,27 +29,42 @@ function highlight(line: string): ReactNode {
   return out
 }
 
-export function GoSource({ code, focus }: { code: string; focus?: number }) {
+export function GoSource({ code, focus, focusLines }: { code: string; focus?: number; focusLines?: number[] }) {
   const hits = useRef<Record<number, HTMLDivElement | null>>({})
+  const active = focusLines?.length ? focusLines : focus ? [focus] : []
+  const activeKey = active.join(',')
   useEffect(() => {
-    const el = focus ? hits.current[focus] : undefined
+    const el = activeKey ? hits.current[Number(activeKey.split(',')[0])] : undefined
     if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [focus])
+  }, [activeKey])
   return (
     <pre className="overflow-auto rounded-[6px] border border-line bg-[#061114] p-3 text-[11.5px] leading-[1.65] text-ink/90">
       <code>
-        {code.split('\n').map((line, i) => (
-          <div
-            key={i}
-            ref={(el) => {
-              hits.current[i + 1] = el
-            }}
-            className={'flex rounded-[2px] ' + (focus === i + 1 ? 'bg-acc/15 ring-1 ring-acc/40' : '')}
-          >
-            <span className="mr-3 inline-block w-7 shrink-0 select-none text-right text-faint/60">{i + 1}</span>
-            <span className="whitespace-pre">{highlight(line)}</span>
-          </div>
-        ))}
+        {code.split('\n').map((line, i) => {
+          const on = active.includes(i + 1)
+          const above = active.includes(i)
+          const below = active.includes(i + 2)
+          const edge = on
+            ? [
+                'border-x border-acc/40 bg-acc/15',
+                above ? '' : 'border-t',
+                below ? '' : 'border-b',
+                above && below ? '' : above ? 'rounded-b-[3px]' : below ? 'rounded-t-[3px]' : 'rounded-[3px]',
+              ].join(' ')
+            : ''
+          return (
+            <div
+              key={i}
+              ref={(el) => {
+                hits.current[i + 1] = el
+              }}
+              className={'flex ' + edge}
+            >
+              <span className="mr-3 inline-block w-7 shrink-0 select-none text-right text-faint/60">{i + 1}</span>
+              <span className="whitespace-pre">{highlight(line)}</span>
+            </div>
+          )
+        })}
       </code>
     </pre>
   )

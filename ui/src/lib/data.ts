@@ -36,7 +36,13 @@ export function flowOf(d: Data, key?: string): FuncFlow | undefined {
 
 export const routeHref = (ri: number) => `/r/${ri}`
 export const stageHref = (ri: number, si: number) => `/r/${ri}/s/${si}`
-export const fnHref = (key: string) => `/f?k=${encodeURIComponent(key)}`
+export const fnHref = (
+  key: string,
+  origin?: { ri: number; si: number },
+  ctx?: { ik?: string; sk?: string },
+) =>
+  `/f?k=${encodeURIComponent(key)}${origin ? `&ri=${origin.ri}&si=${origin.si}` : ''}` +
+  `${ctx?.ik ? `&i=${encodeURIComponent(ctx.ik)}` : ''}${ctx?.sk ? `&t=${encodeURIComponent(ctx.sk)}` : ''}`
 
 export const methodHue: Record<string, string> = {
   GET: 'text-info',
@@ -47,10 +53,22 @@ export const methodHue: Record<string, string> = {
   ANY: 'text-mut',
 }
 
-export function touchTags(st: Stage): string[] {
+export function touchTags(st: Stage, withInputs = true): string[] {
   const tags = new Set<string>()
   for (const c of st.c ?? []) if (c.t) tags.add(c.t)
   if (st.p) tags.add(st.p)
+  if (!withInputs) return [...tags]
+
+  const groups = new Map<string, { kind: string; names: string[] }>()
+  for (const x of st.in ?? []) {
+    if (x.a === 'unused' || x.a === 'undeclared') continue
+    const group = groups.get(x.k) ?? { kind: x.k, names: [] }
+    if (!group.names.includes(x.n)) group.names.push(x.n)
+    groups.set(x.k, group)
+  }
+  for (const g of groups.values()) {
+    tags.add(g.names.length === 1 ? `${g.kind}:${g.names[0]}` : `${g.kind}×${g.names.length}`)
+  }
   return [...tags]
 }
 

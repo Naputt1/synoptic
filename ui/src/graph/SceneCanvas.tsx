@@ -5,19 +5,23 @@ import {
   Controls,
   ReactFlow,
   ReactFlowProvider,
+  useNodesInitialized,
   useNodesState,
   useReactFlow,
   type NodeMouseHandler,
 } from '@xyflow/react'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { SData } from './scenes'
 import { goto } from '../lib/nav'
+import { BranchEdge } from './BranchEdge'
 import { FlowEdge } from './FlowEdge'
+import { JoinEdge } from './JoinEdge'
+import { ReturnEdge } from './ReturnEdge'
 import { SceneNode } from './SceneNode'
 import type { Scene, SNode } from './scenes'
 
 const nodeTypes = { scene: SceneNode }
-const edgeTypes = { flow: FlowEdge, exitRail: ExitEdge }
+const edgeTypes = { flow: FlowEdge, exitRail: ExitEdge, return: ReturnEdge, branch: BranchEdge, join: JoinEdge }
 
 type Box = { x: number; y: number; w: number; h: number }
 
@@ -43,19 +47,24 @@ function sceneBox(nodes: SNode[]): Box {
 function Inner({ scene }: { scene: Scene }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<SNode>(scene.nodes)
   const { setViewport, fitView } = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
   const wrap = useRef<HTMLDivElement>(null)
   const sceneRef = useRef(scene)
   sceneRef.current = scene
   const fitted = useRef({ key: '', w: 0, h: 0 })
+  const [hot, setHot] = useState<string | null>(null)
 
   useEffect(() => {
     setNodes(scene.nodes)
+    setHot(null)
   }, [scene, setNodes])
 
   // Fit once per scene (and again if the canvas is resized), never on a step change.
   useEffect(() => {
+    if (!nodesInitialized) return
     const el = wrap.current
     if (!el) return
+    let retry = 0
 
     const fit = () => {
       const w = el.clientWidth
@@ -66,7 +75,13 @@ function Inner({ scene }: { scene: Scene }) {
       const last = fitted.current
       if (last.key === key && last.w === w && last.h === h) return
       fitted.current = { key, w, h }
-      fitView({ padding: 0.14, duration: 320, minZoom: 0.35, maxZoom: 1.15 })
+      fitView({ padding: 0.14, duration: 320, minZoom: 0.22, maxZoom: 1.15 })
+      // nodes can still be unmeasured on the first frame; settle after they are
+      window.clearTimeout(retry)
+      retry = window.setTimeout(
+        () => fitView({ padding: 0.14, duration: 0, minZoom: 0.22, maxZoom: 1.15 }),
+        80,
+      )
       return
 
       const fitZoom = Math.min((w - 96) / box.w, (h - 120) / box.h)
@@ -87,21 +102,69 @@ function Inner({ scene }: { scene: Scene }) {
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
-    return () => ro.disconnect()
-  }, [scene.key, setViewport])
+    return () => {
+      ro.disconnect()
+      window.clearTimeout(retry)
+    }
+  }, [scene.key, nodesInitialized, setViewport])
 
-  const onNodeClick = useCallback<NodeMouseHandler<SNode>>((_e, n) => {
+  const onNodeClick = useCallback<NodeMouseHandler<SNode>>((e, n) => {
+    const input = n.data.input as string | undefined
+    if (n.data.kind === 'input' && input) {
+      setHot((current) => (current === input ? null : input))
+      const inputLine = n.data.line as number | undefined
+      if (inputLine) {
+        window.dispatchEvent(
+          new CustomEvent('synoptic:source', {
+            detail: {
+              line: inputLine,
+              lines: n.data.lines as number[] | undefined,
+              startLine: n.data.startLine as number | undefined,
+            },
+          }),
+        )
+      }
+      return
+    }
     const href = n.data.href as string | undefined
-    if (href) {
+    // jump cards (c.Next and chain handoffs) move on wherever they are clicked
+    if (href && n.data.jump) {
+      goto(href)
+      return
+    }
+    // only the "open ›" affordance walks into the callee; the card itself
+    // shows the line where the call is made
+    if (href && (e.target as Element).closest?.('[data-open]')) {
       goto(href)
       return
     }
     const line = n.data.line as number | undefined
-    if (line) window.dispatchEvent(new CustomEvent('synoptic:source', { detail: { line, startLine: n.data.startLine as number | undefined } }))
+    if (line) {
+      window.dispatchEvent(
+        new CustomEvent('synoptic:source', {
+          detail: {
+            line,
+            lines: n.data.lines as number[] | undefined,
+            startLine: n.data.startLine as number | undefined,
+          },
+        }),
+      )
+      return
+    }
+    if (href) goto(href)
   }, [])
 
+  const onPaneClick = useCallback(() => setHot(null), [])
+
   return (
-    <div ref={wrap} className="absolute inset-0">
+    <div ref={wrap} className="absolute inset-0" data-hot={hot ?? undefined}>
+      {hot && (
+        <style>{`
+          [data-hot="${hot}"] .react-flow__edge:not(.edge-input-${hot}) { opacity: 0.18; }
+          [data-hot="${hot}"] .edge-input-${hot} { opacity: 1 !important; }
+          [data-hot="${hot}"] .edge-input-${hot} path { stroke: #58e0b7 !important; stroke-width: 2.2 !important; opacity: 1 !important; }
+        `}</style>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={scene.edges}
@@ -109,6 +172,7 @@ function Inner({ scene }: { scene: Scene }) {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}

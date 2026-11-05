@@ -102,7 +102,7 @@ func loadModule(root string) (*Module, error) {
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(src[:min(len(src), 200)]), "Code generated") {
+		if strings.Contains(string(src[:min(len(src), 200)]), "Code generated") && len(src) > 400_000 {
 			continue
 		}
 		af, err := parser.ParseFile(fset, p, src, parser.ParseComments)
@@ -207,6 +207,26 @@ func (m *Module) callsOf(f *Func) []Call {
 				c.Target = fn
 			}
 		}
+		// methods called on the current receiver: h.requireParentPhone(...)
+		if c.Target == nil && f.RecvVar != "" && c.Base == f.RecvVar && f.Recv != "" {
+			for _, fn := range m.Methods[c.Sel] {
+				if fn.Recv == f.Recv {
+					c.Target = fn
+					c.PkgPath = fn.PkgPath
+					break
+				}
+			}
+		}
+		// service fields: h.service.CreateBatch(...)
+		if c.Target == nil && isServiceReceiver(c.Expr) {
+			for _, fn := range m.Methods[c.Sel] {
+				if isServiceReceiver(fn.Recv) {
+					c.Target = fn
+					c.PkgPath = fn.PkgPath
+					break
+				}
+			}
+		}
 		out = append(out, c)
 		return true
 	})
@@ -275,11 +295,17 @@ func typeString(e ast.Expr) string {
 }
 
 func isRouterType(e ast.Expr) bool {
-	switch typeString(e) {
+	s := typeString(e)
+	switch s {
 	case "*fiber.App", "fiber.Router", "fiber.Group",
 		"*gin.Engine", "*gin.RouterGroup", "gin.IRouter", "gin.IRoutes",
 		"chi.Router", "chi.Mux", "*mux.Router", "*echo.Echo", "echo.Group":
 		return true
+	}
+	for _, n := range []string{"RouterGroup", "Router", "ServeMux", "Engine", "ControllerRegister", "Container"} {
+		if strings.Contains(s, n) && !strings.Contains(s, "Route[") && !strings.Contains(s, "Route;") {
+			return true
+		}
 	}
 	return false
 }

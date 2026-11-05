@@ -12,6 +12,8 @@ export type NodeKind =
   | 'exit'
   | 'loop'
   | 'response'
+  | 'return'
+  | 'input'
   | 'note'
   | 'label'
 
@@ -33,7 +35,7 @@ export type SData = {
 } & Record<string, unknown>
 
 export type SNode = Node<SData, 'scene'>
-export type SEdge = Edge<{ live?: boolean }, string>
+export type SEdge = Edge<{ live?: boolean; code?: string }, string>
 
 export type Scene = { nodes: SNode[]; edges: SEdge[]; steps: number; key: string }
 
@@ -336,9 +338,9 @@ export function buildPipelineScene(
   )
   if (last > 0) edges.push(edge('s' + (last - 1), 'out', status(last + 1) === 'cur'))
 
-  for (const e of early) {
+  for (const [i, e] of early.entries()) {
     edges.push({
-      id: e.from + '->out',
+      id: e.from + '->out:' + i,
       source: e.from,
       target: 'out',
       sourceHandle: 'lo',
@@ -356,12 +358,12 @@ export function buildPipelineScene(
   for (const [tag, at] of lane) {
     const id = 'l:' + tag
     nodes.push(
-      node(id, 520, at.y, {
+      node(id, 560, at.y, {
         kind: 'note',
         title: tagLabel[tag] ?? tag,
-        sub: 'reached from this stage',
+        sub: 'from this stage',
         tags: [tag],
-      }, 200, 54),
+      }, 220, 54),
     )
     edges.push({ ...cross(at.from, id), type: 'straight', style: { stroke: '#2b535b', strokeWidth: 1 } })
   }

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import type { Route } from '../lib/types'
+import type { Input, Route } from '../lib/types'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
+import { statusBadgeTone, statusTone } from '../lib/status'
 
 function Cell({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -27,6 +28,96 @@ function Rows({ items, empty }: { items: { n: string; t?: string; rq?: boolean }
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+const kindTone: Record<Input['k'], string> = {
+  path: 'border-line text-mut',
+  query: 'border-info/40 text-info',
+  ctx: 'border-acc/40 text-acc',
+  header: 'border-warn/45 text-warn',
+  cookie: 'border-warn/45 text-warn',
+  form: 'border-line2 text-mut',
+}
+
+const accessTone: Record<Input['a'], string> = {
+  read: 'border-acc/40 text-acc',
+  set: 'border-info/40 text-info',
+  'read+set': 'border-acc/40 text-acc',
+  unused: 'border-line text-faint',
+  undeclared: 'border-bad/45 text-bad',
+  dynamic: 'border-line2 text-mut',
+  bound: 'border-line text-mut',
+}
+
+export function Inputs({ items, flush }: { items: Input[]; flush?: boolean }) {
+  const warnings = items.filter((x) => x.a === 'unused' || x.a === 'undeclared').length
+  return (
+    <div className={flush ? '' : 'border-t border-line/60'}>
+      <div className="flex items-baseline gap-2 px-3 py-2">
+        <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">inputs</span>
+        <span className="text-[10px] text-faint">
+          {items.length} detected
+          {warnings > 0 && <span className="text-warn"> · {warnings} warning{warnings > 1 ? 's' : ''}</span>}
+        </span>
+      </div>
+      {items.length ? (
+        <div className="divide-y divide-line/40 border-t border-line/40">
+          {items.map((x) => (
+            <div
+              key={`${x.k}:${x.n}:${x.e ?? ''}`}
+              className="grid grid-cols-[48px_minmax(0,1fr)_auto] items-baseline gap-2 px-3 py-1.5"
+            >
+              <span
+                className={[
+                  'w-fit rounded-[3px] border px-1 text-[9px] uppercase tracking-[0.08em]',
+                  kindTone[x.k],
+                ].join(' ')}
+              >
+                {x.k}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <code className="text-[11px] text-ink">{x.n}</code>
+                  {x.t && <span className="text-[10px] text-mut">{x.t}</span>}
+                  {x.rq && (
+                    <span className="text-[9px] uppercase tracking-[0.1em] text-warn">required</span>
+                  )}
+                </div>
+                <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-faint">
+                  {x.sb && (
+                    <span>
+                      set by {x.sb}
+                      {x.si ? ` → ${x.si}` : ''}
+                      {x.sa ? ` · ${x.sa}` : ''}
+                    </span>
+                  )}
+                  {x.rb && (
+                    <span>
+                      read by {x.rb}
+                      {x.ri ? ` → ${x.ri}` : ''}
+                      {x.ra ? ` · ${x.ra}` : ''}
+                    </span>
+                  )}
+                  {x.a === 'unused' && <span>never read</span>}
+                  {x.a === 'undeclared' && <span>not in the route path</span>}
+                </div>
+              </div>
+              <span
+                className={[
+                  'rounded-[3px] border px-1 text-[9px] uppercase tracking-[0.08em]',
+                  accessTone[x.a],
+                ].join(' ')}
+              >
+                {x.a}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="border-t border-line/40 px-3 py-2 text-[11px] text-faint">no inputs read</div>
+      )}
     </div>
   )
 }
@@ -58,13 +149,9 @@ export function DocPanel({ r }: { r: Route }) {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-px bg-line/40 sm:grid-cols-2 xl:grid-cols-4">
-        <Cell label="path params">
-          <Rows items={d.path ?? []} empty="none — the path is fixed" />
-        </Cell>
-        <Cell label="query">
-          <Rows items={d.query ?? []} empty="no query keys read" />
-        </Cell>
+      <Inputs items={d.in ?? []} />
+
+      <div className="grid grid-cols-1 gap-px border-t border-line/60 bg-line/40 sm:grid-cols-2">
         <Cell label="body">
           {d.body?.length ? (
             <Rows items={d.body} empty="" />
@@ -82,13 +169,7 @@ export function DocPanel({ r }: { r: Route }) {
                   key={x.c + (x.k ?? []).join('')}
                   className={[
                     'rounded-[3px] border px-1.5 py-px font-mono text-[10.5px]',
-                    x.c.startsWith('2')
-                      ? 'border-acc/40 text-acc'
-                      : x.c.startsWith('4')
-                        ? 'border-warn/45 text-warn'
-                        : x.c.startsWith('5')
-                          ? 'border-bad/45 text-bad'
-                          : 'border-line text-mut',
+                    statusBadgeTone[statusTone(x.c)],
                   ].join(' ')}
                 >
                   {x.c}

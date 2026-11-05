@@ -21,14 +21,34 @@ export type Stage = {
   p?: string
   x?: string
   fk?: string
+  in?: Input[]
 }
 
 export type DocField = { n: string; t?: string; tg?: string; rq?: boolean }
 export type DocResp = { c: string; k?: string[] }
 
+export type Input = {
+  k: 'path' | 'query' | 'ctx' | 'header' | 'cookie' | 'form'
+  n: string
+  t?: string
+  a: 'read' | 'set' | 'read+set' | 'unused' | 'undeclared' | 'dynamic' | 'bound'
+  sb?: string
+  si?: string
+  sa?: string
+  sas?: string[]
+  rb?: string
+  ri?: string
+  ra?: string
+  r?: number
+  s?: number
+  rq?: boolean
+  e?: string
+}
+
 export type Doc = {
   path?: DocField[]
   query?: DocField[]
+  in?: Input[]
   body?: DocField[]
   bt?: string
   resp?: DocResp[]
@@ -75,10 +95,14 @@ export type Step = {
   k: 'call' | 'exit' | 'if' | 'loop' | 'switch' | 'ret' | 'note'
   t: string
   s?: string
+  sl?: number
+  ls?: number[]
   cd?: string
   l?: number
   g?: string
   fk?: string
+  ik?: string
+  sk?: string
   f?: string
   c?: number
   b?: Step[]
@@ -93,6 +117,7 @@ export type FuncFlow = {
   d?: string
   s?: string
   flow?: Step[]
+  in?: Input[]
 }
 
 export type StageTiming = {
@@ -112,6 +137,32 @@ export type RouteTiming = {
   st: StageTiming[]
 }
 
+export type TypeMethod = {
+  n: string
+  k?: string
+  sig?: string
+  l?: number
+}
+
+export type TypeField = {
+  n: string
+  t: string
+  tg?: string
+  e?: boolean
+}
+
+export type SynType = {
+  k: 'interface' | 'struct'
+  n: string
+  key: string
+  pkg: string
+  f?: string
+  l?: number
+  fields?: TypeField[]
+  methods?: TypeMethod[]
+  impls?: string[]
+}
+
 export type Data = {
   repo: string
   mod: string
@@ -119,6 +170,7 @@ export type Data = {
   routes: Route[]
   mw: Middleware[]
   flows: Record<string, FuncFlow>
+  types?: Record<string, SynType>
   timing?: Record<string, RouteTiming>
 }
 

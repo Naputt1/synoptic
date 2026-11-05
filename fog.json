@@ -3,6 +3,26 @@
   "project": {
     "icon": "\u25c6"
   },
+  "dnsmasq": {
+    "domains": ["synoptic"]
+  },
+  "router": {
+    "hostname": "router.synoptic",
+    "dashboard_port": 8080,
+    "shared_network": "fog-router"
+  },
+  "native_routes": [
+    {
+      "host": "synoptic.localhost",
+      "service": "ui",
+      "port": "${ports.dev}"
+    },
+    {
+      "host": "${branch}.synoptic",
+      "service": "ui",
+      "port": "${ports.dev}"
+    }
+  ],
   "ports": {
     "dev": 0,
     "page": 0

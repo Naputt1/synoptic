@@ -29,6 +29,7 @@ type JResp struct {
 type JDoc struct {
 	Path     []JField `json:"path,omitempty"`
 	Query    []JField `json:"query,omitempty"`
+	Inputs   []JInput `json:"in,omitempty"`
 	Body     []JField `json:"body,omitempty"`
 	BodyType string   `json:"bt,omitempty"`
 	Resp     []JResp  `json:"resp,omitempty"`
@@ -59,40 +60,25 @@ func buildDoc(m *Module, r *Route) *JDoc {
 	}
 	d := &JDoc{}
 
-	for _, seg := range strings.Split(r.Path, "/") {
-		if seg == "" {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(seg, ":"):
-			d.Path = append(d.Path, JField{N: seg[1:], T: "string"})
-		case strings.HasPrefix(seg, "*"):
-			d.Path = append(d.Path, JField{N: seg[1:], T: "path"})
-		case strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}"):
-			d.Path = append(d.Path, JField{N: strings.Trim(seg, "{}"), T: "string"})
+	d.Inputs = analyzeInputs(m, r, h)
+	for _, in := range d.Inputs {
+		switch in.Kind {
+		case "path":
+			if in.Access == "undeclared" {
+				continue
+			}
+			t := in.Type
+			if t == "" {
+				t = "string"
+			}
+			d.Path = append(d.Path, JField{N: in.Name, T: t})
+		case "query":
+			if in.Access == "bound" || in.Name == "" {
+				continue
+			}
+			d.Query = append(d.Query, JField{N: in.Name, T: in.Type, Req: in.Req})
 		}
 	}
-
-	seenQ := map[string]bool{}
-	ast.Inspect(h.Decl.Body, func(n ast.Node) bool {
-		ce, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		name := callName(ce)
-		switch name {
-		case "Query", "DefaultQuery", "PostForm", "FormValue", "GetString", "Params", "Param":
-			if k := firstString(ce); k != "" && !seenQ[k] {
-				seenQ[k] = true
-				t := "string"
-				if name == "Params" || name == "Param" || name == "GetString" {
-					t = ""
-				}
-				d.Query = append(d.Query, JField{N: k, T: t})
-			}
-		}
-		return true
-	})
 	sort.Slice(d.Query, func(i, j int) bool { return d.Query[i].N < d.Query[j].N })
 
 	// request body: the struct handed to a binder
@@ -371,6 +357,17 @@ func curlFor(r *Route, d *JDoc) string {
 	for _, p := range d.Path {
 		path = strings.ReplaceAll(path, ":"+p.N, "<"+p.N+">")
 		path = strings.ReplaceAll(path, "{"+p.N+"}", "<"+p.N+">")
+	}
+	if len(d.Query) > 0 {
+		qs := make([]string, 0, len(d.Query))
+		for _, q := range d.Query {
+			qs = append(qs, q.N+"=<"+q.N+">")
+		}
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		path += sep + strings.Join(qs, "&")
 	}
 	var b strings.Builder
 	b.WriteString("curl -X " + r.Method + " http://localhost:8080" + path)
