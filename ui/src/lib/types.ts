@@ -98,6 +98,7 @@ export type Step = {
   sl?: number
   ls?: number[]
   cd?: string
+  cds?: string[]
   l?: number
   g?: string
   fk?: string

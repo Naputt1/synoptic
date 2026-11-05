@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/printer"
 	"go/token"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -12,20 +13,21 @@ import (
 // Step is one box in a function's code flow: a call that matters, a branch that
 // changes where control goes, or the way out. Assignments and defer are not steps.
 type Step struct {
-	Kind    string `json:"k"` // call, exit, if, loop, switch, ret, note
-	Text    string `json:"t"`
-	Sub     string `json:"s,omitempty"`
-	SubLine int    `json:"sl,omitempty"`
-	Code    string `json:"cd,omitempty"`
-	Line    int    `json:"l,omitempty"`
-	Tag     string `json:"g,omitempty"`
-	Key     string `json:"fk,omitempty"`
-	Ik      string `json:"ik,omitempty"`
-	Sk      string `json:"sk,omitempty"`
-	File    string `json:"f,omitempty"`
-	Count   int    `json:"c,omitempty"`
-	Body    []Step `json:"b,omitempty"`
-	Else    []Step `json:"e,omitempty"`
+	Kind    string   `json:"k"` // call, exit, if, loop, switch, ret, note
+	Text    string   `json:"t"`
+	Sub     string   `json:"s,omitempty"`
+	SubLine int      `json:"sl,omitempty"`
+	Code    string   `json:"cd,omitempty"`
+	Codes   []string `json:"cds,omitempty"`
+	Line    int      `json:"l,omitempty"`
+	Tag     string   `json:"g,omitempty"`
+	Key     string   `json:"fk,omitempty"`
+	Ik      string   `json:"ik,omitempty"`
+	Sk      string   `json:"sk,omitempty"`
+	File    string   `json:"f,omitempty"`
+	Count   int      `json:"c,omitempty"`
+	Body    []Step   `json:"b,omitempty"`
+	Else    []Step   `json:"e,omitempty"`
 }
 
 func buildFlow(f *Func) []Step {
@@ -186,7 +188,25 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 		case *ast.LabeledStmt:
 			add(Step{Kind: "note", Text: x.Label.Name + ":", Line: line(x.Pos())})
 		case *ast.ReturnStmt:
-			add(Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Line: line(x.Pos())})
+			st := Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Line: line(x.Pos())}
+			if len(x.Results) > 0 {
+				if ce := firstCall(x.Results[0]); ce != nil {
+					setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
+				}
+			} else if i > 0 {
+				// writeStoreError(...); return — the writer above already gave
+				// the status, even when the flow did not fold the two together.
+				switch prev := list[i-1].(type) {
+				case *ast.ExprStmt:
+					if ce := firstCall(prev.X); ce != nil {
+						setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
+					}
+				case *ast.SwitchStmt, *ast.TypeSwitchStmt:
+					// a switch whose cases write the answer, then one return
+					setCodes(&st, newStatusWalk().stmtStatuses(prev, calls, f))
+				}
+			}
+			add(st)
 		case *ast.DeferStmt, *ast.GoStmt, *ast.EmptyStmt, *ast.BranchStmt:
 			// defer, go, break: badges, not boxes
 		case *ast.ExprStmt:
@@ -305,7 +325,9 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 	}
 
 	if isResponseCall(c) {
-		return Step{Kind: "ret", Text: exprText(ce), Code: statusIn(ce), Line: line(ce.Pos())}
+		st := Step{Kind: "ret", Text: exprText(ce), Line: line(ce.Pos())}
+		setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
+		return st
 	}
 	if (c.Base == "c" || c.Base == "ctx") && c.Sel == "Next" {
 		return Step{Kind: "call", Text: exprText(ce), Sub: "continue chain", File: f.File.Rel, Line: line(ce.Pos())}
@@ -411,16 +433,20 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 		return Step{}, false
 	}
 	// c.JSON(400, …); return — the status lives on the line before the return
-	guardCode := ""
+	sw := newStatusWalk()
+	codes := map[string]bool{}
+	take := func(set map[string]bool) {
+		for code := range set {
+			codes[code] = true
+		}
+	}
 	// if !decode(c, &in) { return } — the helper writes the status itself
 	ast.Inspect(x.Cond, func(n ast.Node) bool {
 		ce, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
-		if code := callStatus(ce, calls, 0, nil); code != "" {
-			guardCode = code
-		}
+		take(sw.callStatuses(ce, calls, f, nil))
 		return true
 	})
 	for _, s := range x.Body.List {
@@ -432,17 +458,13 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 		if ce == nil {
 			continue
 		}
-		if code := callStatus(ce, calls, 0, nil); code != "" {
-			guardCode = code
-		}
+		take(sw.callStatuses(ce, calls, f, nil))
 	}
 	// the call that can fail is more useful than the condition that tests it
 	st := Step{Kind: "exit", Text: exprText(x.Cond), Line: line(x.Pos())}
 	if init, isAssign := x.Init.(*ast.AssignStmt); isAssign && len(init.Rhs) == 1 {
 		if ce := firstCall(init.Rhs[0]); ce != nil {
-			if code := callStatus(ce, calls, 0, nil); code != "" {
-				guardCode = code
-			}
+			take(sw.callStatuses(ce, calls, f, nil))
 			if c, okc := describeCall(ce); okc {
 				if resolved, known := calls[c.Expr]; known {
 					c = resolved
@@ -459,15 +481,12 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 			}
 		}
 	}
-	code := guardCode
 	if len(ret.Results) > 0 {
 		if ce := firstCall(ret.Results[0]); ce != nil {
-			if c := callStatus(ce, calls, 0, nil); c != "" {
-				code = c
-			}
+			take(sw.callStatuses(ce, calls, f, nil))
 		}
 	}
-	st.Code = code
+	setCodes(&st, codes)
 	if st.Text != exprText(x.Cond) {
 		st.Sub = "if " + exprText(x.Cond)
 		st.SubLine = line(x.Pos())
@@ -475,24 +494,20 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 	return st, true
 }
 
-// callStatus resolves a response helper such as utils.ReturnUnauth(c): the
-// helper itself writes the status, so looking only at the caller's arguments
-// would miss it.
-func callStatus(ce *ast.CallExpr, calls map[string]Call, depth int, bind map[string]ast.Expr) string {
-	set := callStatusSet(ce, calls, depth, bind)
-	if len(set) != 1 {
-		return ""
-	}
-	for code := range set {
-		return code
-	}
-	return ""
+// statusWalk follows helpers to every status they can write. A helper with one
+// branch (writeErrorMessage) gives one code; a dispatcher with many branches
+// (writeError) gives several, and the caller shows all of them. The walk is
+// cycle-safe and bounded so a recursive helper cannot trap it.
+type statusWalk struct {
+	onPath map[*Func]bool
+	budget int
 }
 
-// callStatusSet follows a helper and returns every status it can write. A
-// helper with one branch (writeErrorMessage) gives one code; a dispatcher with
-// many branches (writeError) gives several and the caller shows no single one.
-func callStatusSet(ce *ast.CallExpr, calls map[string]Call, depth int, bind map[string]ast.Expr) map[string]bool {
+func newStatusWalk() *statusWalk {
+	return &statusWalk{onPath: map[*Func]bool{}, budget: 400}
+}
+
+func (w *statusWalk) callStatuses(ce *ast.CallExpr, calls map[string]Call, fn *Func, bind map[string]map[string]bool) map[string]bool {
 	c, ok := describeCall(ce)
 	if !ok {
 		return nil
@@ -501,16 +516,50 @@ func callStatusSet(ce *ast.CallExpr, calls map[string]Call, depth int, bind map[
 		c = resolved
 	}
 	if isResponseCall(c) {
-		return statusSetIn(ce, bind)
+		return w.statusArgs(ce.Args, fn, bind)
 	}
-	if depth < 3 && c.Target != nil {
-		return bodyStatusSet(c.Target, depth+1, bindArgs(c.Target, ce.Args, bind))
+	if c.Target == nil {
+		return nil
 	}
-	return nil
+	return w.bodyStatuses(c.Target, w.bindArgs(c.Target, ce.Args, fn, bind))
 }
 
-func bindArgs(fn *Func, args []ast.Expr, bind map[string]ast.Expr) map[string]ast.Expr {
-	out := map[string]ast.Expr{}
+// bodyStatuses unions every status the function's body can write, including
+// calls several helpers deep. Nested function literals are separate flows and
+// are not part of this one.
+func (w *statusWalk) bodyStatuses(fn *Func, bind map[string]map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if fn == nil || fn.Decl == nil || fn.Decl.Body == nil || w.onPath[fn] || w.budget <= 0 {
+		return out
+	}
+	w.budget--
+	w.onPath[fn] = true
+	defer delete(w.onPath, fn)
+
+	calls := make(map[string]Call, len(fn.Calls))
+	for _, c := range fn.Calls {
+		calls[c.Expr] = c
+	}
+	ast.Inspect(fn.Decl.Body, func(n ast.Node) bool {
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		ce, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		for code := range w.callStatuses(ce, calls, fn, bind) {
+			out[code] = true
+		}
+		return true
+	})
+	return out
+}
+
+// bindArgs resolves each argument in the caller's scope, so a status held in a
+// local variable still follows into the helper that writes it.
+func (w *statusWalk) bindArgs(fn *Func, args []ast.Expr, caller *Func, bind map[string]map[string]bool) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
 	if fn == nil || fn.Decl == nil || fn.Decl.Type.Params == nil {
 		return out
 	}
@@ -520,34 +569,36 @@ func bindArgs(fn *Func, args []ast.Expr, bind map[string]ast.Expr) map[string]as
 			if i >= len(args) {
 				return out
 			}
-			e := args[i]
-			if id, ok := e.(*ast.Ident); ok {
-				if bound, found := bind[id.Name]; found {
-					e = bound
-				}
-			}
-			out[name.Name] = e
+			out[name.Name] = w.statusArg(args[i], caller, bind, map[string]bool{})
 			i++
 		}
 	}
 	return out
 }
 
-func bodyStatusSet(fn *Func, depth int, bind map[string]ast.Expr) map[string]bool {
+func (w *statusWalk) statusArgs(args []ast.Expr, fn *Func, bind map[string]map[string]bool) map[string]bool {
 	out := map[string]bool{}
-	if fn == nil || fn.Decl == nil || fn.Decl.Body == nil {
-		return out
+	for _, a := range args {
+		for code := range w.statusArg(a, fn, bind, map[string]bool{}) {
+			out[code] = true
+		}
 	}
-	calls := make(map[string]Call, len(fn.Calls))
-	for _, c := range fn.Calls {
-		calls[c.Expr] = c
-	}
-	ast.Inspect(fn.Decl.Body, func(n ast.Node) bool {
+	return out
+}
+
+// stmtStatuses unions the responses written anywhere inside one statement, such
+// as every case of a switch that ends in a shared return.
+func (w *statusWalk) stmtStatuses(s ast.Stmt, calls map[string]Call, fn *Func) map[string]bool {
+	out := map[string]bool{}
+	ast.Inspect(s, func(n ast.Node) bool {
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
 		ce, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
-		for code := range callStatusSet(ce, calls, depth, bind) {
+		for code := range w.callStatuses(ce, calls, fn, nil) {
 			out[code] = true
 		}
 		return true
@@ -555,46 +606,169 @@ func bodyStatusSet(fn *Func, depth int, bind map[string]ast.Expr) map[string]boo
 	return out
 }
 
-func statusIn(ce *ast.CallExpr) string {
-	set := statusSetIn(ce, nil)
-	if len(set) != 1 {
-		return ""
+// callResults resolves one value returned by a helper, for `value, status, err
+// := h.service.SaveBranch(...)` where the status is decided in the service.
+func (w *statusWalk) callResults(ce *ast.CallExpr, index int, fn *Func, bind map[string]map[string]bool) map[string]bool {
+	c, ok := describeCall(ce)
+	if !ok {
+		return nil
 	}
-	for code := range set {
-		return code
+	for _, known := range fn.Calls {
+		if known.Expr == c.Expr {
+			c = known
+			break
+		}
 	}
-	return ""
+	if c.Target == nil {
+		return nil
+	}
+	return w.resultStatuses(c.Target, index, w.bindArgs(c.Target, ce.Args, fn, bind))
 }
 
-func statusSetIn(ce *ast.CallExpr, bind map[string]ast.Expr) map[string]bool {
+func (w *statusWalk) resultStatuses(fn *Func, index int, bind map[string]map[string]bool) map[string]bool {
 	out := map[string]bool{}
-	for _, a := range ce.Args {
-		if code := statusExpr(a, bind); code != "" {
+	if fn == nil || fn.Decl == nil || fn.Decl.Body == nil || w.onPath[fn] || w.budget <= 0 {
+		return out
+	}
+	w.budget--
+	w.onPath[fn] = true
+	defer delete(w.onPath, fn)
+
+	ast.Inspect(fn.Decl.Body, func(n ast.Node) bool {
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok || index >= len(ret.Results) {
+			return true
+		}
+		for code := range w.statusArg(ret.Results[index], fn, bind, map[string]bool{}) {
 			out[code] = true
+		}
+		return true
+	})
+	return out
+}
+
+func (w *statusWalk) statusArg(e ast.Expr, fn *Func, bind map[string]map[string]bool, seen map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if n, err := strconv.Atoi(x.Value); err == nil && n >= 200 && n <= 599 {
+			out[strconv.Itoa(n)] = true
+		}
+	case *ast.SelectorExpr:
+		if code := statusNames[x.Sel.Name]; code != "" {
+			out[code] = true
+		}
+	case *ast.Ident:
+		if code := statusNames[x.Name]; code != "" {
+			out[code] = true
+			return out
+		}
+		if set, bound := bind[x.Name]; bound {
+			for code := range set {
+				out[code] = true
+			}
+			return out
+		}
+		if seen[x.Name] {
+			return out
+		}
+		seen[x.Name] = true
+		for code := range w.localStatuses(fn, x.Name, bind, seen) {
+			out[code] = true
+		}
+	case *ast.ParenExpr:
+		return w.statusArg(x.X, fn, bind, seen)
+	case *ast.CallExpr:
+		if len(x.Args) == 1 {
+			if id, ok := x.Fun.(*ast.Ident); ok {
+				switch id.Name {
+				case "int", "int32", "int64", "uint", "uint32", "uint64":
+					return w.statusArg(x.Args[0], fn, bind, seen)
+				}
+			}
 		}
 	}
 	return out
 }
 
-func statusExpr(e ast.Expr, bind map[string]ast.Expr) string {
-	switch x := e.(type) {
-	case *ast.BasicLit:
-		if n, err := strconv.Atoi(x.Value); err == nil && n >= 200 && n <= 599 {
-			return strconv.Itoa(n)
-		}
-	case *ast.SelectorExpr:
-		return statusNames[x.Sel.Name]
-	case *ast.Ident:
-		if n := statusNames[x.Name]; n != "" {
-			return n
-		}
-		if bound, ok := bind[x.Name]; ok {
-			return statusExpr(bound, bind)
-		}
-	case *ast.ParenExpr:
-		return statusExpr(x.X, bind)
+// localStatuses finds every value assigned to a name in the function, so
+// `status := http.StatusBadRequest` is resolved where it is used.
+func (w *statusWalk) localStatuses(fn *Func, name string, bind map[string]map[string]bool, seen map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if fn == nil || fn.Decl == nil || fn.Decl.Body == nil {
+		return out
 	}
-	return ""
+	take := func(e ast.Expr) {
+		for code := range w.statusArg(e, fn, bind, seen) {
+			out[code] = true
+		}
+	}
+	ast.Inspect(fn.Decl.Body, func(n ast.Node) bool {
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			multi := len(x.Rhs) == 1 && len(x.Lhs) > 1
+			for i, lhs := range x.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || id.Name != name {
+					continue
+				}
+				if multi {
+					if ce := firstCall(x.Rhs[0]); ce != nil {
+						for code := range w.callResults(ce, i, fn, bind) {
+							out[code] = true
+						}
+					}
+					continue
+				}
+				if i < len(x.Rhs) {
+					take(x.Rhs[i])
+				}
+			}
+		case *ast.ValueSpec:
+			for i, id := range x.Names {
+				if id.Name != name || i >= len(x.Values) {
+					continue
+				}
+				take(x.Values[i])
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// setCodes stores one status as a code, several as codes. There is no single
+// right answer for a dispatcher, so the caller sees all of them.
+func setCodes(st *Step, codes map[string]bool) {
+	list := make([]string, 0, len(codes))
+	for code := range codes {
+		list = append(list, code)
+	}
+	sort.Strings(list)
+	switch len(list) {
+	case 0:
+	case 1:
+		st.Code = list[0]
+	default:
+		st.Codes = list
+	}
+}
+
+// stepCodes returns every status a step can answer with.
+func stepCodes(st Step) []string {
+	if len(st.Codes) > 0 {
+		return st.Codes
+	}
+	if st.Code != "" {
+		return []string{st.Code}
+	}
+	return nil
 }
 
 var statusNames = map[string]string{

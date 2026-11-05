@@ -1,6 +1,7 @@
 import type { Edge, Node } from '@xyflow/react'
 import type { Data, FuncFlow, Route, RouteTiming, Step } from '../lib/types'
 import { fnHref, tagLabel, msOf, routeHref, segments, stageHref, touchTags } from '../lib/data'
+import { codesOf, codesLabel } from '../lib/status'
 
 export type NodeKind =
   | 'root'
@@ -345,7 +346,7 @@ export function buildPipelineScene(
     // early returns converge on the response node instead of sitting beside the spine
     const exits = ((st.fk ? flows?.[st.fk]?.flow : undefined) ?? []).filter((e) => e.k === 'exit')
     if (exits.length) {
-      const codes = [...new Set(exits.map((e) => e.cd).filter(Boolean))] as string[]
+      const codes = [...new Set(exits.flatMap((e) => codesOf(e)))].sort()
       early.push({ from: id, label: codes.join(' · ') || 'exits' })
     }
     const tags = new Set(touchTags(st).filter((t) => t === 'db' || t === 'cache' || t === 'net'))
@@ -442,7 +443,7 @@ export function buildFlowScene(flow: FuncFlow, key: string, step: number, cont?:
             kind: 'exit',
             title: st.t,
             sub: 'returns here',
-            badge: st.cd ? `${st.cd} out` : 'exits',
+            badge: codesLabel(st) ? `${codesLabel(st)} out` : 'exits',
             index: n,
             status: status(n),
           }, 380, 78),
@@ -456,7 +457,7 @@ export function buildFlowScene(flow: FuncFlow, key: string, step: number, cont?:
           type: 'straight',
           style: { stroke: '#e0a33e', strokeDasharray: '4 3', strokeWidth: 1.2, opacity: 0.8 },
         })
-        earlies.push({ from: id, label: st.cd ? `${st.cd} out` : 'exits' })
+        earlies.push({ from: id, label: codesLabel(st) ? `${codesLabel(st)} out` : 'exits' })
         y += gap
         continue
       }
@@ -505,7 +506,7 @@ export function buildFlowScene(flow: FuncFlow, key: string, step: number, cont?:
               kind: br.k === 'ret' ? 'response' : br.k === 'call' ? 'call' : 'note',
               title: br.t,
               sub: br.s,
-              badge: br.cd ? `${br.cd} out` : 'true',
+              badge: codesLabel(br) ? `${codesLabel(br)} out` : 'true',
               line: br.l,
             }, 380, 70),
           )

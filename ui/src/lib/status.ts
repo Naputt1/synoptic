@@ -6,6 +6,16 @@ export function statusTone(code?: string): StatusTone {
   return first === '2' ? 'ok' : first === '3' ? 'info' : first === '4' ? 'warn' : first === '5' ? 'bad' : 'mut'
 }
 
+/** Every status a step can answer with, whether it is one code or several. */
+export function codesOf(s: { cd?: string; cds?: string[] }): string[] {
+  return s.cds?.length ? s.cds : s.cd ? [s.cd] : []
+}
+
+/** The codes as one badge label: "400 · 500". */
+export function codesLabel(s: { cd?: string; cds?: string[] }): string {
+  return codesOf(s).join(' · ')
+}
+
 /** Border and text for a small status-code badge, shared by docs and nodes. */
 export const statusBadgeTone: Record<StatusTone, string> = {
   ok: 'border-acc/40 text-acc',

@@ -106,15 +106,17 @@ func buildDoc(m *Module, r *Route) *JDoc {
 	walk = func(steps []Step) {
 		for _, s := range steps {
 			if s.Kind == "ret" || s.Kind == "exit" {
-				code := s.Code
-				if code == "" {
-					code = "—"
+				codes := stepCodes(s)
+				if len(codes) == 0 {
+					codes = []string{"—"}
 				}
 				keys := respKeys(s.Text)
-				id := code + strings.Join(keys, ",")
-				if !seenResp[id] {
-					seenResp[id] = true
-					d.Resp = append(d.Resp, JResp{Code: code, Keys: keys})
+				for _, code := range codes {
+					id := code + strings.Join(keys, ",")
+					if !seenResp[id] {
+						seenResp[id] = true
+						d.Resp = append(d.Resp, JResp{Code: code, Keys: keys})
+					}
 				}
 			}
 			walk(s.Body)

@@ -1,5 +1,6 @@
 import type { FuncFlow, Input, Step } from '../lib/types'
 import { fnHref } from '../lib/data'
+import { codesLabel, codesOf } from '../lib/status'
 import type { Scene, SEdge, SNode } from './scenes'
 
 const GAP = 88
@@ -155,7 +156,7 @@ export function buildFlowScene(
         kind,
         title: jump ? s.t : titleOf(s),
         sub: jump ? `next · ${jump.label}` : s.s,
-        badge: jump ? 'jump' : badge !== undefined ? badge : kind === 'exit' ? (s.cd ? `${s.cd} out` : 'exits') : s.g ? s.g : undefined,
+        badge: jump ? 'jump' : badge !== undefined ? badge : kind === 'exit' ? (codesLabel(s) ? `${codesLabel(s)} out` : 'exits') : s.g ? s.g : undefined,
         tags: kind === 'exit' && s.g ? [s.g] : undefined,
         index: idx,
         status: status(idx),
@@ -174,12 +175,15 @@ export function buildFlowScene(
 
   const addReturn = (s: Step, y: number, idx: number): string => {
     const id = nextId()
+    const label = codesLabel(s)
+    // one code stays a circle; several widen it into a pill that still fits the text
+    const w = Math.max(RET_W, 14 + label.length * 6.2)
     nodes.push(
       card(id, RAIL_X, y + RET_DY, {
         kind: 'return',
         title: s.t || 'return',
-        badge: s.cd ?? '',
-        sub: s.cd ? `${s.cd}` : 'return',
+        badge: label,
+        sub: label || 'return',
         index: idx,
         status: status(idx),
         href: s.fk ? fnHref(s.fk) : undefined,
@@ -188,10 +192,10 @@ export function buildFlowScene(
         startLine,
         file: s.f ?? flow.f,
         source: true,
-      }, RET_W, RET_W),
+      }, w, RET_W),
     )
-    place(id, RAIL_X, y + RET_DY, RET_W, RET_W, 'return')
-    codeOf.set(id, s.cd ?? '')
+    place(id, RAIL_X, y + RET_DY, w, RET_W, 'return')
+    codeOf.set(id, label)
     return id
   }
 
@@ -418,7 +422,7 @@ export function buildFlowScene(
       const s = list[i]
       if (s.k === 'ret') {
         // a response ends the request: the circle carries the status
-        if (s.cd) {
+        if (codesOf(s).length) {
           // a lone response in a true body sits on the condition's row, so the
           // line leaves the condition's side and cannot be confused with else
           const anchored = anchorY !== undefined && list.length === 1
