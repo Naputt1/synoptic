@@ -249,7 +249,7 @@ export function buildFlowScene(
         const unmatched: number[] = []
         for (const line of pending) {
           const write = cards.find(
-            (n) => linesOfNode(n).includes(line) && /\.(Set|SetCookie)\(/.test(titleOfNode(n)),
+            (n) => linesOfNode(n).includes(line) && /\.(Set|SetCookie|Add|Header)\(/.test(titleOfNode(n)),
           )
           if (write) tagNode(write, `${x.k}:${x.n}`)
           else unmatched.push(line)

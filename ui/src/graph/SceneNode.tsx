@@ -181,6 +181,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.24, delay: Math.min((d.index ?? 0) * 0.018, 0.5), ease: [0.22, 0.7, 0.3, 1] }}
       style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
+      title={d.full}
       className={[
         'relative flex flex-col justify-center overflow-hidden rounded-[6px] border px-2.5 py-2 text-ink',
         isBanner

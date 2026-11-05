@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"go/ast"
 	"go/printer"
+	"go/token"
 	"strconv"
 	"strings"
 )
@@ -28,19 +29,55 @@ type Step struct {
 }
 
 func buildFlow(f *Func) []Step {
+	body := flowBody(f)
+	if body == nil {
+		return nil
+	}
+	return flowSteps(f, body)
+}
+
+// flowBody is the statement list that actually runs: middleware factories hand
+// back their handler, so that closure's body is the flow.
+func flowBody(f *Func) []ast.Stmt {
 	if f == nil || f.Decl == nil || f.Decl.Body == nil {
 		return nil
 	}
 	body := f.Decl.Body.List
-	// middleware factories hand back their handler; that body is the flow
 	if len(body) == 1 {
 		if ret, ok := body[0].(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
 			if lit, isLit := ret.Results[0].(*ast.FuncLit); isLit {
-				return flowSteps(f, lit.Body.List)
+				return lit.Body.List
 			}
 		}
 	}
-	return flowSteps(f, body)
+	return body
+}
+
+// handoff returns the line of a top-level c.Next(), when the function is a
+// filter that hands the request on. A return after it ends this filter's own
+// post-processing; the downstream chain has already run.
+func handoff(f *Func) int {
+	for _, s := range flowBody(f) {
+		es, ok := s.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		ce := firstCall(es.X)
+		if ce == nil {
+			continue
+		}
+		c, ok := describeCall(ce)
+		if !ok || (c.Base != "c" && c.Base != "ctx") || c.Sel != "Next" || c.Expr != c.Base+"."+c.Sel {
+			continue
+		}
+		return line(ce.Pos())
+	}
+	return 0
+}
+
+func afterHandoff(f *Func, pos token.Pos) bool {
+	h := handoff(f)
+	return h > 0 && line(pos) > h
 }
 
 func flowSteps(f *Func, list []ast.Stmt) []Step {
@@ -74,7 +111,13 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 		switch x := s.(type) {
 		case *ast.IfStmt:
 			if ex, ok := exitOf(f, x, calls); ok {
-				add(ex)
+				if afterHandoff(f, x.Pos()) {
+					// past c.Next() the response is already written; the return
+					// only stops this filter's own post-processing.
+					add(Step{Kind: "if", Text: exprText(x.Cond), Sub: "return", Line: line(x.Pos())})
+				} else {
+					add(ex)
+				}
 				continue
 			}
 			st := Step{Kind: "if", Text: exprText(x.Cond), Line: line(x.Pos())}
@@ -153,7 +196,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 			// can fail on top, the guard below, and the card opens the call.
 			if i+1 < len(list) && len(x.Rhs) == 1 {
 				if next, isIf := list[i+1].(*ast.IfStmt); isIf {
-					if ex, isExit := exitOf(f, next, calls); isExit && len(errorNames(x.Lhs)) > 0 {
+					if ex, isExit := exitOf(f, next, calls); isExit && len(errorNames(x.Lhs)) > 0 && !afterHandoff(f, next.Pos()) {
 						if cs := callStep(f, x.Rhs[0], calls); cs.Kind == "call" {
 							ex.Text = cs.Text
 							ex.Tag = cs.Tag
@@ -267,6 +310,9 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 	if (c.Base == "c" || c.Base == "ctx") && c.Sel == "Next" {
 		return Step{Kind: "call", Text: exprText(ce), Sub: "continue chain", File: f.File.Rel, Line: line(ce.Pos())}
 	}
+	if isGinHeaderSet(ce, c) || isResponseHeaderWrite(c, f) {
+		return Step{Kind: "call", Text: exprText(ce), Sub: "response header", File: f.File.Rel, Line: line(ce.Pos())}
+	}
 	if (c.Base == "c" || c.Base == "ctx") && (c.Sel == "Set" || c.Sel == "SetCookie") {
 		return Step{Kind: "call", Text: exprText(ce), Sub: "context write", File: f.File.Rel, Line: line(ce.Pos())}
 	}
@@ -320,6 +366,11 @@ func firstCall(e ast.Expr) *ast.CallExpr {
 }
 
 func isResponseCall(c Call) bool {
+	// c.Writer.Status() and c.Errors.String() share a method name with the
+	// response API but only read from the context.
+	if c.Base == "" || c.Expr != c.Base+"."+c.Sel {
+		return false
+	}
 	switch c.Base {
 	case "c", "ctx", "fiber", "gin":
 		switch c.Sel {

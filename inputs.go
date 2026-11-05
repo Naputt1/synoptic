@@ -429,6 +429,19 @@ func (c *inputCollector) hit(fn *Func, ce *ast.CallExpr, params, args []string) 
 		return inputHit{kind: kind, name: n, typ: typ, access: access}, true
 	}
 
+	// response headers are written either through c.Header(name, value) or
+	// through the header map itself (h.Set after h := c.Writer.Header()).
+	// check this before the generic Set case, which would read the direct
+	// c.Writer.Header().Set chain as a context write.
+	if (base == "c" || base == "ctx") && sel == "Header" && len(ce.Args) >= 2 {
+		return mk("header", "string", "set", 0)
+	}
+	if sel == "Set" || sel == "Add" {
+		if c, ok := describeCall(ce); ok && isResponseHeaderWrite(c, fn) {
+			return mk("header", "string", "set", 0)
+		}
+	}
+
 	switch sel {
 	case "Param", "Params":
 		if !ctxBase || len(ce.Args) == 0 {

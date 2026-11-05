@@ -22,6 +22,8 @@ export type Status = 'idle' | 'cur' | 'done'
 export type SData = {
   kind: NodeKind
   title: string
+  /** full path kept as a hover tooltip when the card only shows its tail */
+  full?: string
   sub?: string
   badge?: string
   index?: number
@@ -93,10 +95,12 @@ export function buildRouterScene(d: Data, focus: string): Scene {
     for (const ri of shown) {
       const r = d.routes[ri]
       const id = 'r:' + ri
+      const parts = segments(r.p)
       nodes.push(
         node(id, level * COL, nextY(level), {
           kind: 'route',
-          title: r.p,
+          title: '/' + (parts[parts.length - 1] ?? r.p),
+          full: r.p,
           badge: r.m,
           sub: `${r.ch.length} ${r.ch.length === 1 ? 'step' : 'steps'}`,
           href: routeHref(ri),
@@ -198,7 +202,7 @@ export function buildRouterScene(d: Data, focus: string): Scene {
         sub: '/' + path,
         badge: String(count),
         href: '/g/' + path,
-      }, 210, 58),
+      }, 176, 58),
     )
   }
   emitRoutes(openDepth + 1, 15 - set.length)
