@@ -72,6 +72,14 @@ export function touchTags(st: Stage, withInputs = true): string[] {
   return [...tags]
 }
 
+/** A readable frame label: explicit event, meaningful name, then type. */
+export function frameName(m: { e?: string; n?: string; t?: string }): string {
+  if (m.n && m.n.length > 2 && !m.n.includes('.')) return m.n
+  const typ = (m.t ?? '').replace(/^.*[./]/, '').replace(/^Msg/, '')
+  if (typ) return typ.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+  return m.e || m.n || 'frame'
+}
+
 export const tagLabel: Record<string, string> = {
   db: 'database',
   cache: 'cache',

@@ -47,6 +47,28 @@ body {
   background-size: 16px 16px;
 }
 
+.stream-board {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: 0;
+}
+.stream-list,
+.stream-detail {
+  min-height: 0;
+  overflow: auto;
+}
+@media (max-width: 640px) {
+  .stream-board {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .stream-list {
+    max-height: 190px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+}
+
 /* react flow, dressed to match the canvas */
 .react-flow {
   background: transparent;

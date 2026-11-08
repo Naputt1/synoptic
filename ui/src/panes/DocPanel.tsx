@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Input, Route } from '../lib/types'
+import type { Input, Route, StreamInfo } from '../lib/types'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { statusBadgeTone, statusTone } from '../lib/status'
@@ -122,13 +122,52 @@ export function Inputs({ items, flush }: { items: Input[]; flush?: boolean }) {
   )
 }
 
+function StreamSection({ s }: { s: StreamInfo }) {
+  const label = s.k === 'ws' ? 'websocket' : 'server-sent events'
+  return (
+    <div className="border-t border-line/60">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+        <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">stream</span>
+        <Badge variant={s.k === 'ws' ? 'info' : 'accent'}>{label}</Badge>
+        {s.oc && <Badge variant="warn">origin checked</Badge>}
+        {s.sp?.map((p) => (
+          <span key={p} className="rounded-[3px] border border-line px-1.5 py-px font-mono text-[10px] text-mut">
+            {p}
+          </span>
+        ))}
+        {s.hb && <span className="text-[10px] text-faint">heartbeat {s.hb}</span>}
+        {s.rt && <span className="text-[10px] text-faint">retry {s.rt}</span>}
+      </div>
+      <p className="px-4 pb-2 text-[10.5px] text-faint">
+        frames and payloads live in the event view above; choose <span className="text-acc">flow</span> for the handler flow.
+      </p>
+      {s.ev?.length ? (
+        <details className="border-t border-line/40 px-4 py-2">
+          <summary className="cursor-pointer text-[9.5px] uppercase tracking-[0.14em] text-faint">
+            evidence · {s.ev.length}
+          </summary>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+            {s.ev.map((e, i) => (
+              <span key={i} className="font-mono text-[10px] text-mut">
+                {e.f}:{e.l}
+                {e.n ? ` · ${e.n}` : ''}
+              </span>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
+  )
+}
+
 export function DocPanel({ r }: { r: Route }) {
   const d = r.doc
+  const s = r.st
   const [copied, setCopied] = useState(false)
-  if (!d) return null
+  if (!d && !s) return null
 
   const copy = () => {
-    void navigator.clipboard?.writeText(d.curl ?? '')
+    void navigator.clipboard?.writeText(d?.curl ?? '')
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
   }
@@ -137,21 +176,23 @@ export function DocPanel({ r }: { r: Route }) {
     <div className="border-t border-line bg-panel/40">
       <div className="flex items-center gap-2 px-4 py-2">
         <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">documentation</span>
-        {d.auth && (
+        {d?.auth && (
           <Badge variant="warn" title={d.aw ? `guarded by ${d.aw}` : undefined}>
             auth required
           </Badge>
         )}
-        {d.owner && (
+        {d?.owner && (
           <span className="ml-auto text-[10px] text-faint">
             {d.owner} · {d.commit} · {d.age}
           </span>
         )}
       </div>
 
-      <Inputs items={d.in ?? []} />
+      {s && <StreamSection s={s} />}
 
-      <div className="grid grid-cols-1 gap-px border-t border-line/60 bg-line/40 sm:grid-cols-2">
+      {d && (!s || d.in?.length) ? <Inputs items={d.in ?? []} /> : null}
+
+      {d && !s && <div className="grid grid-cols-1 gap-px border-t border-line/60 bg-line/40 sm:grid-cols-2">
         <Cell label="body">
           {d.body?.length ? (
             <Rows items={d.body} empty="" />
@@ -181,9 +222,9 @@ export function DocPanel({ r }: { r: Route }) {
             <span className="text-faint">no literal response read</span>
           )}
         </Cell>
-      </div>
+      </div>}
 
-      <div className="grid grid-cols-1 gap-px border-t border-line/60 bg-line/40 lg:grid-cols-[1fr_1.4fr]">
+      {d && !s && <div className="grid grid-cols-1 gap-px border-t border-line/60 bg-line/40 lg:grid-cols-[1fr_1.4fr]">
         <Cell label="data touched">
           {d.tables?.length ? (
             <div className="flex flex-wrap gap-1.5">
@@ -207,7 +248,7 @@ export function DocPanel({ r }: { r: Route }) {
             </Button>
           </div>
         </Cell>
-      </div>
+      </div>}
     </div>
   )
 }

@@ -5,17 +5,28 @@ import type { Data, Route } from '@/lib/types'
 import { routeHref } from '@/lib/data'
 import { goto } from '@/lib/nav'
 
-type Via = 'path' | 'stage' | 'file' | 'doc'
+type Via = 'path' | 'stage' | 'file' | 'stream' | 'doc'
 
 type Hit = { r: Route; i: number; via: Via; score: number }
 
-const VIA_RANK: Record<Via, number> = { path: 0, stage: 1, file: 2, doc: 3 }
+const VIA_RANK: Record<Via, number> = { path: 0, stage: 1, file: 2, stream: 3, doc: 4 }
 
 function fields(r: Route) {
+  const stream = r.st
+    ? [
+        r.pr ?? '',
+        ...(r.st.events ?? []),
+        ...(r.st.send ?? []).flatMap((m) => [m.n ?? '', m.t ?? '', m.e ?? '', ...(m.f ?? []).map((f) => f.n)]),
+        ...(r.st.recv ?? []).flatMap((m) => [m.n ?? '', m.t ?? '', m.e ?? '', ...(m.f ?? []).map((f) => f.n)]),
+      ]
+        .join(' ')
+        .toLowerCase()
+    : ''
   return {
-    path: (r.m + ' ' + r.p).toLowerCase(),
+    path: (r.m + ' ' + r.p + ' ' + (r.pr ?? '')).toLowerCase(),
     stage: r.ch.map((s) => s.n).join(' ').toLowerCase(),
     file: r.f.toLowerCase(),
+    stream,
     doc: r.ch
       .map((s) => s.d ?? '')
       .join(' ')
@@ -29,10 +40,10 @@ function search(routes: Route[], q: string): Hit[] {
   const hits: Hit[] = []
   routes.forEach((r, i) => {
     const f = fields(r)
-    const all = f.path + ' ' + f.stage + ' ' + f.file + ' ' + f.doc
+    const all = f.path + ' ' + f.stage + ' ' + f.file + ' ' + f.stream + ' ' + f.doc
     if (!tokens.every((t) => all.includes(t))) return
     let via: Via = 'doc'
-    for (const v of ['path', 'stage', 'file', 'doc'] as Via[]) {
+    for (const v of ['path', 'stage', 'file', 'stream', 'doc'] as Via[]) {
       if (tokens.every((t) => f[v].includes(t))) {
         via = v
         break
@@ -92,7 +103,7 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
             autoFocus
             value={q}
             onValueChange={setQ}
-            placeholder="method, path, stage, file or doc text — every word must match"
+            placeholder="method, protocol, path, stage, event, file or doc text — every word must match"
             className="w-full bg-transparent text-[12.5px] text-ink outline-none placeholder:text-faint"
           />
           <kbd className="rounded-[3px] border border-line px-1 text-[10px]">esc</kbd>
@@ -117,14 +128,20 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
               onSelect={() => pick(i)}
               className="flex cursor-pointer items-center gap-2 rounded-[4px] px-2 py-1.5 text-[12px] text-ink data-[selected=true]:bg-acc/10"
             >
-              <span className="w-12 shrink-0 text-[10px] text-info">{r.m}</span>
+              <span className={`w-12 shrink-0 text-[10px] ${r.pr ? 'text-acc' : 'text-info'}`}>
+                {r.pr ? r.pr.toUpperCase() : r.m}
+              </span>
               <span className="min-w-0 flex-1 truncate font-mono">
                 <Highlight text={r.p} tokens={tokens} />
               </span>
               <span className="shrink-0 text-[10px] text-faint">{r.ch.at(-1)?.n}</span>
               <span
                 className={`w-9 shrink-0 text-right text-[9px] uppercase tracking-[0.1em] ${
-                  via === 'path' ? 'text-acc' : via === 'stage' ? 'text-info' : 'text-faint'
+                  via === 'path' || via === 'stream'
+                    ? 'text-acc'
+                    : via === 'stage'
+                      ? 'text-info'
+                      : 'text-faint'
                 }`}
               >
                 {via}

@@ -27,6 +27,72 @@ export type Stage = {
 export type DocField = { n: string; t?: string; tg?: string; rq?: boolean }
 export type DocResp = { c: string; k?: string[] }
 
+export type Evidence = { f: string; l: number; n?: string }
+
+export type StreamMessage = {
+  d: 'send' | 'recv'
+  n?: string
+  t?: string
+  f?: DocField[]
+  e?: string
+  ex?: string
+  ev?: string
+  file?: string
+  l?: number
+}
+
+export type StreamExt = {
+  g: 'db' | 'cache' | 'net' | string
+  n: string
+  fk?: string
+  f?: string
+  l?: number
+  ev?: string
+}
+export type EventOrigin = {
+  n: string
+  fk?: string
+  f?: string
+  l?: number
+  k?: 'route' | 'worker' | 'background' | string
+  via?: string
+  m?: string
+  p?: string
+  ri?: number
+  c?: number
+}
+export type StreamEvent = {
+  n: string
+  fn?: string
+  fk?: string
+  f?: string
+  l?: number
+  or?: EventOrigin[]
+}
+export type Effect = {
+  k: 'read' | 'write' | 'publish' | string
+  n: string
+  b?: string
+  s?: string
+  l?: number
+  fk?: string
+  c?: number
+}
+export type StreamInfo = {
+  k: 'ws' | 'sse'
+  ev?: Evidence[]
+  events?: string[]
+  evs?: StreamEvent[]
+  hk?: string
+  send?: StreamMessage[]
+  recv?: StreamMessage[]
+  ext?: StreamExt[]
+  sp?: string[]
+  oc?: boolean
+  hb?: string
+  rt?: string
+}
+
 export type Input = {
   k: 'path' | 'query' | 'ctx' | 'header' | 'cookie' | 'form'
   n: string
@@ -66,6 +132,8 @@ export type Route = {
   p: string
   f: string
   l: number
+  pr?: 'ws' | 'sse'
+  st?: StreamInfo
   ch: Stage[]
   doc?: Doc
 }
@@ -89,11 +157,40 @@ export type Stats = {
   documented: number
   packages: number
   funcs: number
+  streams?: number
+  ws?: number
+  sse?: number
+  services?: number
+  rpcs?: number
+}
+
+export type ServiceMethod = {
+  n: string
+  p: string
+  k: string
+  rq?: string
+  rs?: string
+  d?: string
+  f?: string
+  l?: number
+  fk?: string
+  curl?: string
+}
+
+export type Service = {
+  n: string
+  p?: string
+  f?: string
+  l?: number
+  d?: string
+  mw?: Stage[]
+  methods: ServiceMethod[]
 }
 
 export type Step = {
-  k: 'call' | 'exit' | 'if' | 'loop' | 'switch' | 'ret' | 'note'
+  k: 'call' | 'exit' | 'if' | 'loop' | 'switch' | 'ret' | 'note' | 'continue'
   t: string
+  rk?: 'nil' | 'error' | 'void'
   s?: string
   sl?: number
   ls?: number[]
@@ -119,6 +216,7 @@ export type FuncFlow = {
   s?: string
   flow?: Step[]
   in?: Input[]
+  fx?: Effect[]
 }
 
 export type StageTiming = {
@@ -169,6 +267,7 @@ export type Data = {
   mod: string
   stats: Stats
   routes: Route[]
+  services?: Service[]
   mw: Middleware[]
   flows: Record<string, FuncFlow>
   types?: Record<string, SynType>

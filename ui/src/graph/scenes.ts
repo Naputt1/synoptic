@@ -30,6 +30,8 @@ export type SData = {
   index?: number
   status?: Status
   tags?: string[]
+  /** outcome of a return/exit path, shown beside "returns here" */
+  rk?: 'nil' | 'error' | 'void'
   href?: string
   /** source file, line(s) and start line for the source sheet */
   file?: string
@@ -49,7 +51,7 @@ export type SData = {
 } & Record<string, unknown>
 
 export type SNode = Node<SData, 'scene'>
-export type SEdge = Edge<{ live?: boolean; code?: string }, string>
+export type SEdge = Edge<{ live?: boolean; code?: string; railX?: number }, string>
 
 export type Scene = { nodes: SNode[]; edges: SEdge[]; steps: number; key: string }
 
@@ -85,13 +87,19 @@ const cross = (from: string, to: string): SEdge => ({
 export const COL = 200
 
 /** Level 1: the router, one column per path depth, focused on a group path. */
-export function buildRouterScene(d: Data, focus: string): Scene {
+export function buildRouterScene(
+  d: Data,
+  focus: string,
+  proto: 'all' | 'http' | 'ws' | 'sse' = 'all',
+): Scene {
   const segs = segments(focus)
   const depth = segs.length
   const nodes: SNode[] = []
   const edges: SEdge[] = []
 
   const colPath = new Map<number, string>()
+  const active = (r: Route) =>
+    proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto
 
   const under = (path: string) =>
     !focus || path === focus || path.startsWith(focus + '/') || focus.startsWith(path + '/')
@@ -99,8 +107,9 @@ export function buildRouterScene(d: Data, focus: string): Scene {
   const emitRoutes = (level: number, cap = 22) => {
     const all = (routesByDepth.get(level) ?? [])
       .filter((i) => {
-        const p = d.routes[i].p
-        return under(p === '/' ? '' : p.slice(1))
+        const r = d.routes[i]
+        const p = r.p
+        return active(r) && under(p === '/' ? '' : p.slice(1))
       })
       .sort((a, b) => d.routes[a].p.localeCompare(d.routes[b].p))
     const shown = all.slice(0, Math.max(0, cap))
@@ -113,8 +122,10 @@ export function buildRouterScene(d: Data, focus: string): Scene {
           kind: 'route',
           title: '/' + (parts[parts.length - 1] ?? r.p),
           full: r.p,
-          badge: r.m,
-          sub: `${r.ch.length} ${r.ch.length === 1 ? 'step' : 'steps'}`,
+          badge: r.pr ? r.pr.toUpperCase() : r.m,
+          sub: r.pr
+            ? `${r.m} · ${r.ch.length} ${r.ch.length === 1 ? 'step' : 'steps'}`
+            : `${r.ch.length} ${r.ch.length === 1 ? 'step' : 'steps'}`,
           href: routeHref(ri),
           path: r.p,
           method: r.m,
@@ -149,7 +160,7 @@ export function buildRouterScene(d: Data, focus: string): Scene {
       kind: 'root',
       title: d.repo,
       sub: d.mod,
-      badge: `${d.stats.routes} routes`,
+      badge: `${d.routes.filter(active).length} ${proto === 'all' ? 'routes' : proto.toUpperCase()}`,
       status: depth === 0 ? 'cur' : 'done',
       href: '/',
     }, 176, 58),
@@ -160,6 +171,7 @@ export function buildRouterScene(d: Data, focus: string): Scene {
   const parentOf = new Map<string, string>()
 
   d.routes.forEach((r, i) => {
+    if (!active(r)) return
     const s = segments(r.p)
     const chain = s.slice(0, Math.max(1, s.length - 1))
     if (!chain.length) {
@@ -188,7 +200,7 @@ export function buildRouterScene(d: Data, focus: string): Scene {
     for (const path of set) {
       const id = 'g:' + path
       const name = path.split('/').pop() ?? path
-      const count = d.routes.filter((r) => r.p === '/' + path + '/' || r.p.startsWith('/' + path + '/')).length
+      const count = d.routes.filter((r) => active(r) && (r.p === '/' + path + '/' || r.p.startsWith('/' + path + '/'))).length
       const isWanted = id === wanted
       if (!colPath.has(level + 1)) colPath.set(level + 1, path)
       nodes.push(
@@ -210,7 +222,7 @@ export function buildRouterScene(d: Data, focus: string): Scene {
   for (const path of set) {
     const id = 'g:' + path
     const name = path.split('/').pop() ?? path
-    const count = d.routes.filter((r) => r.p.startsWith('/' + path + '/')).length
+    const count = d.routes.filter((r) => active(r) && r.p.startsWith('/' + path + '/')).length
     if (!colPath.has(openDepth + 1)) colPath.set(openDepth + 1, path)
     nodes.push(
       node(id, (openDepth + 1) * COL, nextY(openDepth + 1), {
@@ -225,7 +237,9 @@ export function buildRouterScene(d: Data, focus: string): Scene {
   emitRoutes(openDepth + 1, 15 - set.length)
 
   const laneLevel = openDepth + 2
-  const laneRoutes = d.routes.filter((r) => !focus || r.p === '/' + focus || r.p.startsWith('/' + focus + '/'))
+  const laneRoutes = d.routes.filter(
+    (r) => active(r) && (!focus || r.p === '/' + focus || r.p.startsWith('/' + focus + '/')),
+  )
   const hit: Record<string, number> = {}
   for (const r of laneRoutes) {
     const seen = new Set<string>()
@@ -281,10 +295,35 @@ export function buildRouterScene(d: Data, focus: string): Scene {
   })
   nodes.unshift(...headers)
 
-  return { nodes, edges, steps: 0, key: 'router:' + focus }
+  return { nodes, edges, steps: 0, key: `router:${focus}:${proto}` }
 }
 
 /** Level 2: one request walking its middleware chain. */
+export type ExtCall = { g: string; n: string; fk?: string; f?: string; l?: number; ev?: string }
+
+/** Every external call reached by a route: explicit stream-handler calls plus
+ *  db/cache/net steps in the baked flows. */
+export function externalCalls(r: Route, flows?: Record<string, FuncFlow>): ExtCall[] {
+  const out: ExtCall[] = []
+  const seen = new Set<string>()
+  const base = (g: string, n: string, f?: string, l?: number) => `${g}|${n}|${f ?? ''}|${l ?? 0}`
+  const add = (g: string, n: string, fk?: string, f?: string, l?: number, ev?: string) => {
+    if (!n) return
+    const key = `${base(g, n, f, l)}|${ev ?? ''}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ g, n, fk, f, l, ev })
+  }
+  for (const x of r.st?.ext ?? []) add(x.g, x.n, x.fk, x.f, x.l, x.ev)
+  for (const st of r.ch)
+    for (const step of (st.fk ? flows?.[st.fk]?.flow : undefined) ?? [])
+      if (step.g === 'db' || step.g === 'cache' || step.g === 'net') {
+        if (out.some((x) => base(x.g, x.n, x.f, x.l) === base(step.g ?? '', step.t ?? '', step.f, step.l))) continue
+        add(step.g ?? '', step.t ?? '', step.fk, step.f, step.l)
+      }
+  return out
+}
+
 export function buildPipelineScene(
   r: Route,
   ri: number,
@@ -303,7 +342,7 @@ export function buildPipelineScene(
   nodes.push(
     node('in', x, y, {
       kind: 'request',
-      title: 'request in',
+      title: r.pr === 'ws' ? 'websocket connect' : r.pr === 'sse' ? 'event stream' : 'request in',
       sub: `${r.m} ${r.p}`,
       index: 0,
       status: status(0),
@@ -317,7 +356,6 @@ export function buildPipelineScene(
   y += gap
 
   const early: { from: string; label: string }[] = []
-  const lane = new Map<string, { y: number; from: string }>()
 
   r.ch.forEach((st, i) => {
     const id = 's' + i
@@ -349,10 +387,6 @@ export function buildPipelineScene(
       const codes = [...new Set(exits.flatMap((e) => codesOf(e)))].sort()
       early.push({ from: id, label: codes.join(' · ') || 'exits' })
     }
-    const tags = new Set(touchTags(st).filter((t) => t === 'db' || t === 'cache' || t === 'net'))
-    for (const step of (st.fk ? flows?.[st.fk]?.flow : undefined) ?? [])
-      if (step.g === 'db' || step.g === 'cache' || step.g === 'net') tags.add(step.g)
-    for (const t of tags) if (!lane.has(t)) lane.set(t, { y, from: id })
     y += gap
   })
 
@@ -360,8 +394,12 @@ export function buildPipelineScene(
   nodes.push(
     node('out', x, y, {
       kind: 'response',
-      title: 'response out',
-      sub: timing ? `per request, from ${timing.spans} spans` : undefined,
+      title: r.pr ? 'stream open' : 'response out',
+      sub: r.pr
+        ? `${r.pr === 'ws' ? 'websocket' : 'event stream'} · ${r.st?.events?.length ?? 0} message types`
+        : timing
+          ? `per request, from ${timing.spans} spans`
+          : undefined,
       index: last + 1,
       status: status(last + 1),
       ms: timing ? msOf(timing.total) : undefined,
@@ -384,19 +422,6 @@ export function buildPipelineScene(
       labelBgBorderRadius: 3,
       style: { stroke: '#e0a33e', strokeWidth: 1.1, strokeDasharray: '4 3', opacity: 0.75 },
     })
-  }
-
-  for (const [tag, at] of lane) {
-    const id = 'l:' + tag
-    nodes.push(
-      node(id, 560, at.y, {
-        kind: 'note',
-        title: tagLabel[tag] ?? tag,
-        sub: 'from this stage',
-        tags: [tag],
-      }, 220, 54),
-    )
-    edges.push({ ...cross(at.from, id), type: 'straight', style: { stroke: '#2b535b', strokeWidth: 1 } })
   }
 
   return { nodes, edges, steps: last + 2, key: 'pipe:' + ri }

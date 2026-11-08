@@ -73,11 +73,17 @@ function Tag({ t }: { t: string }) {
       ? 'text-warn border-warn/40'
       : t === 'cache'
         ? 'text-info border-info/40'
-        : t === 'service'
-          ? 'text-acc border-acc/40'
-          : t === 'auth'
-            ? 'text-info border-info/40'
-            : kind === 'ctx'
+        : t === 'error'
+          ? 'text-bad border-bad/40'
+          : t === 'nil'
+            ? 'text-acc border-acc/40'
+            : t === 'void'
+              ? 'text-mut border-line'
+              : t === 'service'
+                ? 'text-acc border-acc/40'
+                : t === 'auth'
+                  ? 'text-info border-info/40'
+                  : kind === 'ctx'
           ? 'text-info border-info/40'
           : kind === 'query'
             ? 'text-acc border-acc/40'
@@ -206,6 +212,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
     >
       <Handle type="target" position={Position.Top} id="t" />
       <Handle type="source" position={Position.Bottom} id="b" />
+      <Handle type="target" position={Position.Bottom} id="bi" style={{ left: '75%' }} />
       <Handle type="target" position={Position.Left} id="l" />
       <Handle type="source" position={Position.Right} id="r" />
       <Handle type="target" position={Position.Right} id="ri" style={{ top: "50%" }} />
@@ -276,7 +283,8 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
       {isExit && (
         <div className="mt-1 flex items-center gap-1.5 self-start">
           <span className="text-[10px] text-mut">returns here</span>
-          {d.badge && (
+          {d.rk && <Tag t={d.rk} />}
+          {d.badge && (!d.rk || d.badge !== 'exits') && (
             <span
               className={`rounded-[3px] border px-1 text-[10px] leading-[14px] ${statusBadgeTone[statusTone(d.badge as string | undefined)]}`}
             >

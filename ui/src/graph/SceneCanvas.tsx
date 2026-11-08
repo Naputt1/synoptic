@@ -27,12 +27,20 @@ import { copyValue, openSearch } from '../lib/actions'
 import { BranchEdge } from './BranchEdge'
 import { FlowEdge } from './FlowEdge'
 import { JoinEdge } from './JoinEdge'
+import { LoopEdge } from './LoopEdge'
 import { ReturnEdge } from './ReturnEdge'
 import { SceneNode } from './SceneNode'
 import type { Scene, SNode } from './scenes'
 
 const nodeTypes = { scene: SceneNode }
-const edgeTypes = { flow: FlowEdge, exitRail: ExitEdge, return: ReturnEdge, branch: BranchEdge, join: JoinEdge }
+const edgeTypes = {
+  flow: FlowEdge,
+  exitRail: ExitEdge,
+  return: ReturnEdge,
+  branch: BranchEdge,
+  join: JoinEdge,
+  loop: LoopEdge,
+}
 
 type Box = { x: number; y: number; w: number; h: number }
 

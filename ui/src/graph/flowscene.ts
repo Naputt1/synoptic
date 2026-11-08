@@ -139,6 +139,25 @@ export function buildFlowScene(
     } as SEdge)
   }
 
+  const loopLabeled = new Set<string>()
+  const loopEdge = (from: string, to: string, label?: string) => {
+    const a = pos.get(from)
+    const b = pos.get(to)
+    if (!a || !b) return
+    const show = label && !loopLabeled.has(to)
+    if (show) loopLabeled.add(to)
+    edges.push({
+      id: `${from}->${to}`,
+      source: from,
+      target: to,
+      sourceHandle: 'b',
+      targetHandle: 'bi',
+      type: 'loop',
+      label: show ? label : undefined,
+      data: { railX: b.x + b.w * 0.75 },
+    } as SEdge)
+  }
+
   const addCard = (
     s: Step,
     col: number,
@@ -158,6 +177,7 @@ export function buildFlowScene(
         sub: jump ? `next · ${jump.label}` : s.s,
         badge: jump ? 'jump' : badge !== undefined ? badge : kind === 'exit' ? (codesLabel(s) ? `${codesLabel(s)} out` : 'exits') : s.g ? s.g : undefined,
         tags: kind === 'exit' && s.g ? [s.g] : undefined,
+        rk: kind === 'exit' ? s.rk : undefined,
         index: idx,
         status: status(idx),
         jump: Boolean(jump),
@@ -176,6 +196,7 @@ export function buildFlowScene(
   const addReturn = (s: Step, y: number, idx: number): string => {
     const id = nextId()
     const label = codesLabel(s)
+    const retSub = s.rk ? (label ? `${label} · ${s.rk} return` : `${s.rk} return`) : label || 'return'
     // one code stays a circle; several widen it into a pill that still fits the text
     const w = Math.max(RET_W, 14 + label.length * 6.2)
     nodes.push(
@@ -183,7 +204,7 @@ export function buildFlowScene(
         kind: 'return',
         title: s.t || 'return',
         badge: label,
-        sub: label || 'return',
+        sub: retSub,
         index: idx,
         status: status(idx),
         href: s.fk ? fnHref(s.fk) : undefined,
@@ -395,6 +416,7 @@ export function buildFlowScene(
     from: string | null,
     fromLabel?: string,
     anchorY?: number,
+    loopTarget?: string,
   ): { tail: string | null; falls: boolean } => {
     const col = depth * COL_W
     let prev = from
@@ -465,16 +487,26 @@ export function buildFlowScene(
         continue
       }
 
+      if (s.k === 'continue') {
+        const { id } = addCard(s, col, 'note')
+        connect(id)
+        if (loopTarget) loopEdge(id, loopTarget, 'loop')
+        falls = false
+        prev = id
+        label = undefined
+        continue
+      }
+
       if (s.k === 'if') {
         const cardY = rowY
         const { id } = addCard(s, col, 'note')
         connect(id)
 
         const tb = s.b?.length
-          ? renderList(s.b, depth + 1, id, 'true', cardY)
+          ? renderList(s.b, depth + 1, id, 'true', cardY, loopTarget)
           : { tail: id, falls: true }
         const eb = s.e?.length
-          ? renderList(s.e, depth, id, 'else')
+          ? renderList(s.e, depth, id, 'else', undefined, loopTarget)
           : { tail: id, falls: true }
 
         if (s.e?.length) {
@@ -493,6 +525,29 @@ export function buildFlowScene(
           falls = true
           prev = id
         }
+        label = undefined
+        continue
+      }
+
+      if (s.k === 'loop') {
+        const cardY = rowY
+        const { id } = addCard(s, col, 'loop')
+        connect(id)
+        if (s.b?.length) {
+          const body = renderList(s.b, depth + 1, id, 'body', cardY, id)
+          if (body.tail && body.falls) loopEdge(body.tail, id, 'loop')
+          // keep the loop-back rail's lane clear: the next step starts below
+          // the whole body, not under the loop card.
+          let bottom = cardY
+          for (const n of nodes) {
+            if (n.position.y < cardY) continue
+            const h = (n.data as { h?: number }).h ?? CARD_H
+            bottom = Math.max(bottom, n.position.y + h)
+          }
+          rowY = Math.max(rowY, bottom + GAP)
+        }
+        falls = true
+        prev = id
         label = undefined
         continue
       }
