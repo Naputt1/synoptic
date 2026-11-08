@@ -20,7 +20,7 @@ Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <f
 | **step** | the handler body as a flow: calls on the spine, `if err != nil` guards as exits with their status code, loops as `↺`, in-repo calls open their own flow. |
 | **code** | the raw source, when you want the exact lines. |
 
-`MODE` switches between **static** (everything at once) and **replay** (walk the chain step by step; the edge lights up as the request moves). `⌘K` searches every route and stage, `esc` goes back, `←`/`→` step, space plays. The URL holds the whole position (`#/r/0/s/3`), so a link to a middleware is a link.
+Click a stage to open its flow. `⌘K` searches every route and stage and `esc` goes back. The URL holds the whole position (`#/r/0/s/3`), so a link to a middleware is a link.
 
 Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Description` from swaggo when present. With no comment, the page says so and lets the flow be the description.
 
@@ -38,7 +38,6 @@ The UI is React + TanStack Router + React Flow + shadcn-style primitives; the bu
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).
 - Flow depth stops at foreign packages and unbound interface methods; recursion stops at the breadcrumb trail.
-- Replay is synthetic — it follows the chain, it does not replay a recorded trace.
 - Stream schemas stop at dynamic values (`any`, channels, values crossing an interface). Socket.IO rooms are not treated as plain WebSockets.
 - gRPC needs the generated `_grpc.pb.go` registration and `_ServiceDesc` inside `-root`. A multi-module workspace whose imports do not match the root module path, gRPC-gateway, and Connect-Go registrations are not resolved yet.
 
@@ -65,9 +64,8 @@ end times. Stage names are matched to chain entries by exact name, then by the
 last dotted segment (`auth.AdminLoginCheck` ↔ `AdminLoginCheck`), then by
 substring. Spans that match no chain entry are counted but not plotted.
 
-With a trace in the page, `MODE → trace` shows each stage's median, its p95, its
-share of the total (the bar along the card's bottom edge), and names the slowest
-stage in the header. Without `-trace`, the mode says so instead of pretending.
+With `-trace`, each stage shows its median, its p95, its share of the total (the
+bar along the card's bottom edge), and the header names the slowest stage.
 
 ## Dev environment (`fog`)
 

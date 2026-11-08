@@ -110,13 +110,6 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
   const clickable = Boolean(d.href)
   const isLabel = d.kind === 'label'
 
-  const statusRing =
-    d.status === 'cur'
-      ? 'ring-1 ring-acc/70 shadow-[0_0_22px_-4px_rgba(88,224,183,0.45)]'
-      : d.status === 'done'
-        ? 'ring-1 ring-acc/25'
-        : ''
-
   if (isLabel) {
     return (
       <div className="px-0.5 text-[9.5px] uppercase tracking-[0.18em] text-faint">{d.title}</div>
@@ -160,7 +153,6 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
 
   if (isReturn) {
     const tone = returnTone[statusTone(d.badge as string | undefined)]
-    const state = d.status === 'cur' ? tone.cur : d.status === 'done' ? tone.done : tone.idle
     return (
       <CardMenu data={d}>
         <motion.div
@@ -179,7 +171,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           <Handle type="target" position={Position.Right} id="ri" style={{ top: '50%' }} />
           <Handle type="source" position={Position.Left} id="lo" style={{ top: '50%' }} />
           <div
-            className={`flex size-full items-center justify-center rounded-full border border-dashed transition-colors ${tone.hover} ${state}`}
+            className={`flex size-full items-center justify-center rounded-full border border-dashed transition-colors ${tone.hover} ${tone.idle}`}
           >
             <span className={`text-[10px] font-semibold leading-none tabular-nums ${tone.text}`}>{String(d.badge || '↩')}</span>
           </div>
@@ -206,7 +198,6 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
             : isRoot
               ? 'border-line2 bg-panel2'
               : 'border-line bg-panel',
-        statusRing,
         clickable ? 'cursor-pointer transition-colors hover:border-acc/60 hover:bg-panel2' : '',
       ].join(' ')}
     >
@@ -218,12 +209,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
       <Handle type="target" position={Position.Right} id="ri" style={{ top: "50%" }} />
       <Handle type="source" position={Position.Left} id="lo" style={{ top: "50%" }} />
 
-      <span
-        className={[
-          'absolute -left-[19px] top-[13px] size-[7px] rounded-full border',
-          d.status === 'done' ? 'border-acc bg-acc' : d.status === 'cur' ? 'border-acc bg-acc shadow-[0_0_8px_rgba(88,224,183,.8)]' : 'border-line2 bg-canvas',
-        ].join(' ')}
-      />
+      <span className="absolute -left-[19px] top-[13px] size-[7px] rounded-full border border-line2 bg-canvas" />
 
       <div className="flex items-center gap-1.5">
         {d.index !== undefined && d.index > 0 && !isBanner && (

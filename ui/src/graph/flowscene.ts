@@ -13,7 +13,6 @@ const RAIL_X = -520
 const INPUT_H = 44
 const INPUT_GAP = 56
 
-type Status = 'idle' | 'cur' | 'done'
 type NodeKind = 'call' | 'exit' | 'note' | 'loop' | 'response' | 'return' | 'input' | 'label'
 
 function card(
@@ -62,7 +61,6 @@ function titleOf(s: Step) {
 export function buildFlowScene(
   flow: FuncFlow,
   key: string,
-  step: number,
   cont?: { label: string; href: string },
   prev?: { label: string; href: string },
   inputs?: Input[],
@@ -76,7 +74,6 @@ export function buildFlowScene(
   let stepNo = 0
   const nextId = () => `n${++n}`
   const nextStep = () => stepNo++
-  const status = (i: number): Status => (step < 0 ? 'idle' : i < step ? 'done' : i === step ? 'cur' : 'idle')
 
   // one row per statement, like lines of code
   let rowY = 0
@@ -179,7 +176,6 @@ export function buildFlowScene(
         tags: kind === 'exit' && s.g ? [s.g] : undefined,
         rk: kind === 'exit' ? s.rk : undefined,
         index: idx,
-        status: status(idx),
         jump: Boolean(jump),
         href: jump ? jump.href : s.fk ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined) : undefined,
         line: s.l,
@@ -206,7 +202,6 @@ export function buildFlowScene(
         badge: label,
         sub: retSub,
         index: idx,
-        status: status(idx),
         href: s.fk ? fnHref(s.fk) : undefined,
         line: s.l,
         lines: s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
@@ -648,5 +643,5 @@ export function buildFlowScene(
     place(id, 0, y, SPINE_W, 60, 'note')
   }
 
-  return { nodes, edges, steps: stepNo, key: 'flow:' + key }
+  return { nodes, edges, key: 'flow:' + key }
 }

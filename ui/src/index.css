@@ -184,22 +184,6 @@ body {
   }
 }
 
-@keyframes dash {
-  to {
-    stroke-dashoffset: -14;
-  }
-}
-.edge-live {
-  stroke-dasharray: 4 6;
-  animation: dash 0.7s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .edge-live {
-    animation: none;
-  }
-}
-
 button:focus-visible,
 a:focus-visible,
 [role='button']:focus-visible {

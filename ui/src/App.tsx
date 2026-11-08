@@ -9,7 +9,7 @@ import {
   useRouterState,
   useSearch,
 } from '@tanstack/react-router'
-import { ArrowLeft, ArrowRight, Code2, Pause, Play, RotateCcw, Search } from 'lucide-react'
+import { Code2, Search } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { GoSource } from './components/GoSource'
 import { Badge } from './components/ui/badge'
@@ -43,83 +43,6 @@ const useData = () => {
   const d = useContext(DataCtx)
   if (!d) throw new Error('data not loaded')
   return d
-}
-
-/* ---------- playback ---------- */
-
-type Mode = 'static' | 'replay' | 'trace'
-
-type Playback = {
-  step: number
-  steps: number
-  playing: boolean
-  mode: Mode
-  setSteps: (n: number) => void
-  setMode: (m: Mode) => void
-  play: () => void
-  pause: () => void
-  next: () => void
-  prev: () => void
-  reset: () => void
-}
-
-const PBCtx = createContext<Playback | null>(null)
-const usePB = () => {
-  const v = useContext(PBCtx)
-  if (!v) throw new Error('playback missing')
-  return v
-}
-
-function PlaybackProvider({ children }: { children: React.ReactNode }) {
-  const [step, setStep] = useState(-1)
-  const [steps, setSteps] = useState(0)
-  const [playing, setPlaying] = useState(false)
-  const [mode, setModeState] = useState<Mode>('static')
-
-  useEffect(() => {
-    if (!playing) return
-    if (step >= steps - 1) {
-      setPlaying(false)
-      return
-    }
-    const t = window.setTimeout(() => setStep((s) => s + 1), 820)
-    return () => window.clearTimeout(t)
-  }, [playing, step, steps])
-
-  const value: Playback = useMemo(
-    () => ({
-      step,
-      steps,
-      playing,
-      mode,
-      setSteps,
-      setMode: (m) => {
-        setModeState(m)
-        setStep(-1)
-        setPlaying(m === 'replay')
-      },
-      play: () => {
-        if (steps > 0 && step >= steps - 1) setStep(-1)
-        setPlaying(true)
-      },
-      pause: () => setPlaying(false),
-      next: () => {
-        setPlaying(false)
-        setStep((s) => Math.min(s + 1, steps - 1))
-      },
-      prev: () => {
-        setPlaying(false)
-        setStep((s) => Math.max(s - 1, -1))
-      },
-      reset: () => {
-        setPlaying(false)
-        setStep(-1)
-      },
-    }),
-    [step, steps, playing, mode],
-  )
-
-  return <PBCtx.Provider value={value}>{children}</PBCtx.Provider>
 }
 
 /* ---------- crumbs ---------- */
@@ -214,7 +137,6 @@ function useCrumbs(): Crumb[] {
 
 function Topbar({ onSearch }: { onSearch: () => void }) {
   const data = useData()
-  const pb = usePB()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const parts = pathname.split('/').filter(Boolean)
   const level = parts[0] === 'rpc' ? '' : parts[0] === 'f' ? 'code' : parts[0] === 'r' ? (parts[2] === 's' ? 'step' : 'route') : 'router'
@@ -269,35 +191,6 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
             rpc <span className="text-[10px] opacity-70">{data.stats.rpcs}</span>
           </Button>
         )}
-        <div className="flex items-center gap-1.5">
-          <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">mode</span>
-          <Segmented
-            value={pb.mode}
-            onChange={(v) => pb.setMode(v as Mode)}
-            options={[
-              { value: 'static', label: 'static' },
-              { value: 'replay', label: 'replay' },
-              { value: 'trace', label: 'trace' },
-            ]}
-          />
-        </div>
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={pb.prev} aria-label="previous step">
-            <ArrowLeft className="size-3.5" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={pb.playing ? pb.pause : pb.play} aria-label="play">
-            {pb.playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-          </Button>
-          <Button variant="ghost" size="icon" onClick={pb.next} aria-label="next step">
-            <ArrowRight className="size-3.5" />
-          </Button>
-          <Button variant="ghost" size="icon" onClick={pb.reset} aria-label="reset">
-            <RotateCcw className="size-3.5" />
-          </Button>
-          <span className="ml-1 w-[78px] text-[10px] text-mut">
-            {pb.steps ? `${pb.step + 1} / ${pb.steps}` : 'no steps'}
-          </span>
-        </div>
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
           <kbd className="ml-1 rounded-[3px] border border-line px-1 text-[9.5px] text-faint">⌘K</kbd>
@@ -332,7 +225,6 @@ function Crumbs() {
 
 function Shell() {
   const data = useData()
-  const pb = usePB()
   const [searchOpen, setSearchOpen] = useState(false)
   const [toast, setToast] = useState<{ id: number; text: string; tone: 'ok' | 'bad' } | null>(null)
 
@@ -379,18 +271,11 @@ function Shell() {
         setSearchOpen(true)
       } else if (e.key === 'Escape') {
         window.history.back()
-      } else if (e.key === 'ArrowRight') {
-        pb.next()
-      } else if (e.key === 'ArrowLeft') {
-        pb.prev()
-      } else if (e.key === ' ') {
-        e.preventDefault()
-        pb.playing ? pb.pause() : pb.play()
       }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [pb, searchOpen])
+  }, [searchOpen])
 
   return (
     <div className="flex h-full flex-col bg-canvas">
@@ -400,7 +285,7 @@ function Shell() {
         <Outlet />
       </div>
       <div className="pointer-events-none absolute bottom-2 left-4 text-[10px] text-faint">
-        click any box to open it · right-click for actions · ← → steps · space plays · esc goes back · ⌘K searches
+        click any box to open it · right-click for actions · esc goes back · ⌘K searches
       </div>
       {toast && (
         <div
@@ -442,9 +327,7 @@ function Root() {
 
   return (
     <DataCtx.Provider value={data}>
-      <PlaybackProvider>
-        <Shell />
-      </PlaybackProvider>
+      <Shell />
     </DataCtx.Provider>
   )
 }
@@ -507,16 +390,6 @@ function GraphPage({ scene, card, children }: { scene: Scene; card: React.ReactN
       )}
     </div>
   )
-}
-
-function useSceneSteps(scene: Scene, key: string) {
-  const pb = usePB()
-  const { setSteps, reset } = pb
-  useEffect(() => {
-    setSteps(scene.steps)
-    reset()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
 }
 
 function CallsList({ calls }: { calls?: Call[] }) {
@@ -1278,17 +1151,15 @@ function RouterView() {
 
 function PipelineView() {
   const data = useData()
-  const pb = usePB()
   const params = useParams({ strict: false }) as { ri: string }
   const ri = Number(params.ri)
   const r = data.routes[ri]
   const timing = r ? timingOf(data, r) : undefined
-  const over = pb.mode === 'trace' ? timing : undefined
+  const over = timing
   const scene = useMemo(
-    () => (r ? buildPipelineScene(r, ri, pb.step, over, data.flows) : { nodes: [], edges: [], steps: 0, key: '' }),
-    [r, ri, pb.step, over],
+    () => (r ? buildPipelineScene(r, ri, over, data.flows) : { nodes: [], edges: [], key: "" }),
+    [r, ri, over],
   )
-  useSceneSteps(scene, 'r' + ri)
   const [sheet, setSheet] = useState<number | null>(null)
   const [streamView, setStreamView] = useState<'exchanges' | 'canvas'>('exchanges')
 
@@ -1309,15 +1180,13 @@ function PipelineView() {
     `${r.f}:${r.l} · ${r.ch.length} step${r.ch.length === 1 ? '' : 's'} · ${mw} middleware first` +
     (over ? ` · ${msOf(over.total)} per request · ${over.spans} spans` : '')
   const note =
-    pb.mode === 'trace' && !timing
-      ? 'no trace in this page — rebuild with -trace <spans.json> to see where the time goes'
-      : over
-        ? slow && slowName
-          ? `slowest stage: ${slowName} — ${msOf(slow.m)} median, ${msOf(slow.p95)} p95, ${Math.round(slow.sh * 100)}% of the time`
-          : 'the trace matched this route but not its stages'
-        : handler?.d
-          ? undefined
-          : 'no doc comment on the handler — open it, the flow is the description'
+    over
+      ? slow && slowName
+        ? `slowest stage: ${slowName} — ${msOf(slow.m)} median, ${msOf(slow.p95)} p95, ${Math.round(slow.sh * 100)}% of the time`
+        : 'the trace matched this route but not its stages'
+      : handler?.d
+        ? undefined
+        : 'no doc comment on the handler — open it, the flow is the description'
 
   const card = (
     <ScopeCard
@@ -1385,7 +1254,6 @@ function PipelineView() {
 
 function FlowView() {
   const data = useData()
-  const pb = usePB()
   const params = useParams({ strict: false }) as { ri: string; si: string }
   const ri = Number(params.ri)
   const si = Number(params.si)
@@ -1396,10 +1264,9 @@ function FlowView() {
   const nextStage = r && si + 1 < r.ch.length ? { label: r.ch[si + 1].n, href: '/r/' + ri + '/s/' + (si + 1) } : undefined
   const prevStage = r && si > 0 ? { label: r.ch[si - 1].n, href: '/r/' + ri + '/s/' + (si - 1) } : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, pb.step, nextStage, prevStage, st?.in, { ri, si }) : { nodes: [], edges: [], steps: 0, key: '' }),
-    [flow, key, pb.step, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, st?.in, ri, si],
+    () => (flow ? buildFlowScene(flow, key, nextStage, prevStage, st?.in, { ri, si }) : { nodes: [], edges: [], key: "" }),
+    [flow, key, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, st?.in, ri, si],
   )
-  useSceneSteps(scene, 's' + ri + ':' + si)
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
@@ -1461,7 +1328,6 @@ function FlowView() {
 
 function FnView() {
   const data = useData()
-  const pb = usePB()
   const search = useSearch({ strict: false }) as { k?: string; ri?: string; si?: string }
   const key = search.k ?? ''
   const flow: FuncFlow | undefined = flowOf(data, key)
@@ -1477,10 +1343,9 @@ function FnView() {
     ? { label: parent.ch[parentSi - 1].n, href: `/r/${parentRi}/s/${parentSi - 1}` }
     : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, pb.step, nextStage, prevStage, flow.in, origin) : { nodes: [], edges: [], steps: 0, key: '' }),
-    [flow, key, pb.step, flow?.in, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, parentOk, parentRi, parentSi],
+    () => (flow ? buildFlowScene(flow, key, nextStage, prevStage, flow.in, origin) : { nodes: [], edges: [], key: "" }),
+    [flow, key, flow?.in, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, parentOk, parentRi, parentSi],
   )
-  useSceneSteps(scene, 'f' + key)
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
@@ -1663,7 +1528,7 @@ function TypeView() {
 
 /* ---------- rpc ---------- */
 
-const emptyScene: Scene = { nodes: [], edges: [], steps: 0, key: '' }
+const emptyScene: Scene = { nodes: [], edges: [], key: "" }
 
 function kindTone(k: string): 'default' | 'info' | 'warn' | 'accent' {
   if (k === 'bidi') return 'accent'
@@ -1744,7 +1609,6 @@ function RPCView() {
 
 function RPCMethodView() {
   const data = useData()
-  const pb = usePB()
   const params = useParams({ strict: false }) as { si: string; mi: string }
   const si = Number(params.si)
   const mi = Number(params.mi)
@@ -1753,10 +1617,9 @@ function RPCMethodView() {
   const key = method?.fk ?? ''
   const flow: FuncFlow | undefined = key ? flowOf(data, key) : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, pb.step, undefined, undefined, flow.in, undefined) : emptyScene),
-    [flow, key, pb.step, flow?.in],
+    () => (flow ? buildFlowScene(flow, key, undefined, undefined, flow.in, undefined) : emptyScene),
+    [flow, key, flow?.in],
   )
-  useSceneSteps(scene, `rpc:${si}:${mi}`)
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {

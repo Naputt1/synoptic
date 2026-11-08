@@ -1,7 +1,7 @@
 import type { Edge, Node } from '@xyflow/react'
-import type { Data, FuncFlow, Route, RouteTiming, Step } from '../lib/types'
-import { fnHref, tagLabel, msOf, routeHref, segments, stageHref, touchTags } from '../lib/data'
-import { codesOf, codesLabel } from '../lib/status'
+import type { Data, FuncFlow, Route, RouteTiming } from '../lib/types'
+import { tagLabel, msOf, routeHref, segments, stageHref, touchTags } from '../lib/data'
+import { codesOf } from '../lib/status'
 
 export type NodeKind =
   | 'root'
@@ -18,8 +18,6 @@ export type NodeKind =
   | 'note'
   | 'label'
 
-export type Status = 'idle' | 'cur' | 'done'
-
 export type SData = {
   kind: NodeKind
   title: string
@@ -28,7 +26,6 @@ export type SData = {
   sub?: string
   badge?: string
   index?: number
-  status?: Status
   tags?: string[]
   /** outcome of a return/exit path, shown beside "returns here" */
   rk?: 'nil' | 'error' | 'void'
@@ -51,9 +48,9 @@ export type SData = {
 } & Record<string, unknown>
 
 export type SNode = Node<SData, 'scene'>
-export type SEdge = Edge<{ live?: boolean; code?: string; railX?: number }, string>
+export type SEdge = Edge<{ code?: string; railX?: number }, string>
 
-export type Scene = { nodes: SNode[]; edges: SEdge[]; steps: number; key: string }
+export type Scene = { nodes: SNode[]; edges: SEdge[]; key: string }
 
 const node = (
   id: string,
@@ -64,12 +61,12 @@ const node = (
   height: number,
 ): SNode => ({ id, type: 'scene', position: { x, y }, data: { ...data, w: width, h: height } })
 
-const edge = (from: string, to: string, live = false): SEdge => ({
+const edge = (from: string, to: string): SEdge => ({
   id: `${from}->${to}`,
   source: from,
   target: to,
   type: 'flow',
-  data: { live },
+  data: {},
   sourceHandle: 'b',
   targetHandle: 't',
 })
@@ -161,7 +158,6 @@ export function buildRouterScene(
       title: d.repo,
       sub: d.mod,
       badge: `${d.routes.filter(active).length} ${proto === 'all' ? 'routes' : proto.toUpperCase()}`,
-      status: depth === 0 ? 'cur' : 'done',
       href: '/',
     }, 176, 58),
   )
@@ -195,13 +191,11 @@ export function buildRouterScene(
   })
 
   for (let level = 0; level < depth; level++) {
-    const wanted = 'g:' + segs.slice(0, level + 1).join('/')
     const set = [...(groupsByDepth.get(level) ?? [])].filter(under).sort()
     for (const path of set) {
       const id = 'g:' + path
       const name = path.split('/').pop() ?? path
       const count = d.routes.filter((r) => active(r) && (r.p === '/' + path + '/' || r.p.startsWith('/' + path + '/'))).length
-      const isWanted = id === wanted
       if (!colPath.has(level + 1)) colPath.set(level + 1, path)
       nodes.push(
         node(id, (level + 1) * COL, nextY(level + 1), {
@@ -209,7 +203,6 @@ export function buildRouterScene(
           title: name,
           sub: '/' + path,
           badge: String(count),
-          status: isWanted ? 'cur' : 'idle',
           href: '/g/' + path,
         }, 176, 58),
       )
@@ -295,7 +288,7 @@ export function buildRouterScene(
   })
   nodes.unshift(...headers)
 
-  return { nodes, edges, steps: 0, key: `router:${focus}:${proto}` }
+  return { nodes, edges, key: `router:${focus}:${proto}` }
 }
 
 /** Level 2: one request walking its middleware chain. */
@@ -327,7 +320,6 @@ export function externalCalls(r: Route, flows?: Record<string, FuncFlow>): ExtCa
 export function buildPipelineScene(
   r: Route,
   ri: number,
-  step: number,
   timing?: RouteTiming,
   flows?: Record<string, FuncFlow>,
 ): Scene {
@@ -336,8 +328,6 @@ export function buildPipelineScene(
   const x = 150
   let y = 0
   const gap = 84
-  const status = (i: number): Status =>
-    step < 0 ? 'idle' : i < step ? 'done' : i === step ? 'cur' : 'idle'
 
   nodes.push(
     node('in', x, y, {
@@ -345,7 +335,6 @@ export function buildPipelineScene(
       title: r.pr === 'ws' ? 'websocket connect' : r.pr === 'sse' ? 'event stream' : 'request in',
       sub: `${r.m} ${r.p}`,
       index: 0,
-      status: status(0),
       path: r.p,
       method: r.m,
       curl: r.doc?.curl,
@@ -368,7 +357,6 @@ export function buildPipelineScene(
         badge: st.d ? undefined : st.r ?? st.k,
         tags: touchTags(st),
         index: i + 1,
-        status: status(i + 1),
         href: stageHref(ri, i),
         ms: t ? msOf(t.m) : undefined,
         share: t?.sh,
@@ -379,7 +367,7 @@ export function buildPipelineScene(
         curl: r.doc?.curl,
       }, 380, 76),
     )
-    edges.push(edge(i === 0 ? 'in' : 's' + (i - 1), id, status(i + 1) === 'cur'))
+    edges.push(edge(i === 0 ? 'in' : 's' + (i - 1), id))
 
     // early returns converge on the response node instead of sitting beside the spine
     const exits = ((st.fk ? flows?.[st.fk]?.flow : undefined) ?? []).filter((e) => e.k === 'exit')
@@ -401,11 +389,10 @@ export function buildPipelineScene(
           ? `per request, from ${timing.spans} spans`
           : undefined,
       index: last + 1,
-      status: status(last + 1),
       ms: timing ? msOf(timing.total) : undefined,
     }, 380, 60),
   )
-  if (last > 0) edges.push(edge('s' + (last - 1), 'out', status(last + 1) === 'cur'))
+  if (last > 0) edges.push(edge('s' + (last - 1), 'out'))
 
   for (const [i, e] of early.entries()) {
     edges.push({
@@ -424,174 +411,6 @@ export function buildPipelineScene(
     })
   }
 
-  return { nodes, edges, steps: last + 2, key: 'pipe:' + ri }
+  return { nodes, edges, key: 'pipe:' + ri }
 }
 
-function flowNodeId(prefix: string, i: number) {
-  return `${prefix}:${i}`
-}
-
-/** Level 3: the code path of one function — a spine of calls, exits to the right. */
-export function buildFlowScene(flow: FuncFlow, key: string, step: number, cont?: { label: string; href: string }): Scene {
-  const nodes: SNode[] = []
-  const edges: SEdge[] = []
-  const steps = flow.flow ?? []
-  const x = 0
-  const gap = 88
-  let y = 0
-  let lastId: string | null = null
-  let n = 0
-  const earlies: { from: string; label: string }[] = []
-
-  const status = (i: number): Status =>
-    step < 0 ? 'idle' : i < step ? 'done' : i === step ? 'cur' : 'idle'
-
-  const walk = (list: Step[], indent: number) => {
-    for (const st of list) {
-      n += 1
-      const id = flowNodeId(key, n)
-      const isExit = st.k === 'exit'
-      const isIf = st.k === 'if' || st.k === 'switch' || (st.k === 'note' && !!st.b)
-      const kind: NodeKind = isExit
-        ? 'exit'
-        : st.k === 'loop'
-          ? 'loop'
-          : st.k === 'ret'
-            ? 'response'
-            : st.k === 'note' || st.k === 'switch' || st.k === 'if'
-              ? 'note'
-              : 'call'
-
-      if (isExit && lastId) {
-        nodes.push(
-          node(id, x - 420, y - gap, {
-            kind: 'exit',
-            title: st.t,
-            sub: 'returns here',
-            badge: codesLabel(st) ? `${codesLabel(st)} out` : 'exits',
-            index: n,
-            status: status(n),
-          }, 380, 78),
-        )
-        edges.push({
-          id: `${lastId}->${id}`,
-          source: lastId,
-          target: id,
-          sourceHandle: 'lo',
-          targetHandle: 'ri',
-          type: 'straight',
-          style: { stroke: '#e0a33e', strokeDasharray: '4 3', strokeWidth: 1.2, opacity: 0.8 },
-        })
-        earlies.push({ from: id, label: codesLabel(st) ? `${codesLabel(st)} out` : 'exits' })
-        y += gap
-        continue
-      }
-
-      nodes.push(
-        node(id, x + indent, y, {
-          kind,
-          title: st.t + (st.c && st.c > 1 ? ` ×${st.c}` : ''),
-          sub: st.s,
-          badge: st.g ? st.g : undefined,
-          index: n,
-          status: status(n),
-          line: st.l,
-          href: st.fk ? fnHref(st.fk) : undefined,
-        }, 380 - indent * 2, 78),
-      )
-      if (lastId) edges.push(edge(lastId, id, status(n) === 'cur'))
-      lastId = id
-      y += gap
-
-      nodes.push(
-        node(id, x + indent, y, {
-          kind,
-          title: st.t + (st.c && st.c > 1 ? ` ×${st.c}` : ''),
-          sub: st.s,
-          badge: st.g ? st.g : undefined,
-          index: n,
-          status: status(n),
-          href: st.fk ? fnHref(st.fk) : undefined,
-        }, 380 - indent * 2, 78),
-      )
-      if (lastId) edges.push(edge(lastId, id, status(n) === 'cur'))
-      lastId = id
-      y += gap
-
-      // the false path is the default: the spine keeps going. the true branch
-      // runs in its own lane so it cannot be mistaken for the main flow.
-      if (isIf) {
-        const laneX = x + 430
-        let ly = y - gap
-        const tru = st.b ?? []
-        tru.forEach((_, bi) => {
-          const br = tru[bi]
-          nodes.push(
-            node(`${id}:t${bi}`, laneX, ly, {
-              kind: br.k === 'ret' ? 'response' : br.k === 'call' ? 'call' : 'note',
-              title: br.t,
-              sub: br.s,
-              badge: codesLabel(br) ? `${codesLabel(br)} out` : 'true',
-              line: br.l,
-            }, 380, 70),
-          )
-          ly += gap
-        })
-        if (tru.length) {
-          edges.push({
-            id: `${id}->t0`,
-            source: id,
-            target: `${id}:t0`,
-            sourceHandle: 'r',
-            targetHandle: 'l',
-            type: 'straight',
-            label: 'true',
-            style: { stroke: '#58e0b7', strokeWidth: 1.2, opacity: 0.7 },
-          })
-        }
-      }
-      if (st.e?.length) walk(st.e, indent)
-    }
-  }
-  walk(steps, 0)
-
-  if (earlies.length) {
-    const outId = 'flowout'
-    nodes.push(
-      node(outId, x - 420, y, {
-        kind: 'response',
-        title: 'response out',
-        sub: earlies.length === 1 ? '1 early return above' : `${earlies.length} early returns above`,
-      }, 380, 60),
-    )
-    earlies.forEach((e, i) => {
-      edges.push({
-        id: `${e.from}->${outId}-${i}`,
-        source: e.from,
-        target: outId,
-        sourceHandle: 'lo',
-        targetHandle: 'l',
-        type: 'exitRail',
-        label: e.label,
-        style: { stroke: '#e0a33e', strokeDasharray: '4 3', strokeWidth: 1.4 },
-      })
-    })
-  }
-  if (cont) {
-    nodes.push(
-      node('nextstage', x, y, {
-        kind: 'note',
-        title: `next · ${cont.label}`,
-        sub: 'continue to the next filter on this request',
-        badge: 'jump',
-        href: cont.href,
-      }, 380, 60),
-    )
-    if (earlies.length)
-      edges.push({ id: 'flowout->next', source: 'flowout', target: 'nextstage', type: 'straight', style: { stroke: '#2b535b', strokeWidth: 1 } })
-    y += 60
-  }
-  nodes.unshift(node('lh', x, -42, { kind: 'label', title: 'calls', w: 380, h: 18 }, 380, 18))
-
-  return { nodes, edges, steps: Math.max(n, 0), key: 'flow:' + key }
-}
