@@ -28,7 +28,7 @@ Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Descrip
 
 ## How it reads the code
 
-- `load.go` parses the module (AST, imports, doc comments) and indexes every func with its calls.
+- `load.go` parses the module (AST, imports, doc comments) and indexes every func with its calls. Nested `go.mod` files are respected, so a microservice workspace with one module per service resolves across them.
 - `routes.go` walks the route registration: `gin`, `fiber`, `chi`, `gorilla/mux`, `net/http`, `echo`, including groups registered in other functions, middleware added with `Use`, handler factories called inline (`app.Get("/x", Activities(*u))`), factories stored in a variable, and `.PathPrefix(...).Subrouter()` / `.Methods(...)`.
 - `flow.go` turns a function body into steps: calls, exits (an `if` whose body only returns), loops, switches, repeated calls folded to `×n`.
 - `grpc.go` reads `Register<Service>Server` calls and the generated `_ServiceDesc`, then resolves the implementation and its interceptor chain for the RPC tab.
@@ -36,12 +36,19 @@ Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Descrip
 
 The UI is React + TanStack Router + React Flow + shadcn-style primitives; the build is a single HTML file (no assets, no network).
 
+## Multiple services in one checkout
+
+A repo that holds several services — `jobs/`, `users/`, `projects/`, each with its own `package main` (with or without a `cmd/` inside) — gets a **SERVICE** switcher next to LEVEL: `all | jobs | users | projects`. There is no config file: entry points are found from `package main` + `func main`, and every route and gRPC service is attributed to the entry point whose directory contains the file that registers it. The topbar counts, the router map, route search and the RPC surface follow the choice; flows stay shared, because one function can be reached from more than one entry point.
+
+The page stays unsplit when the split would lie: a route registered outside every entry point's directory keeps one surface, and an entry point that owns no route or RPC (a queue worker, say) is not offered.
+
 ## Limits
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).
-- Flow depth stops at foreign packages and unbound interface methods; recursion stops at the breadcrumb trail.
+- Flow depth stops at foreign packages. A call through an interface field resolves to its single concrete implementation (repository → store); an interface with several implementations stays unbound rather than guessed. Recursion stops at the breadcrumb trail.
 - Stream schemas stop at dynamic values (`any`, channels, values crossing an interface). Socket.IO rooms are not treated as plain WebSockets.
-- gRPC needs the generated `_grpc.pb.go` registration and `_ServiceDesc` inside `-root`. A multi-module workspace whose imports do not match the root module path, gRPC-gateway, and Connect-Go registrations are not resolved yet.
+- The service switcher is directory-based. A repo that wires every route from one central router, outside the entry point directories, keeps a single surface rather than a wrong split.
+- gRPC needs the generated `_grpc.pb.go` registration and `_ServiceDesc` inside `-root`. The implementation is found even when its factory returns the service interface. Modules referenced by `go.work` from outside `-root`, gRPC-gateway, and Connect-Go registrations are not resolved yet.
 
 ## Timing overlay (`-trace`)
 
@@ -101,7 +108,7 @@ Every route page carries a documentation band under the map, built from the sour
 | path params | `:id`, `{id}`, `*rest` segments of the registered pattern |
 | query | string literals in `Query`, `DefaultQuery`, `PostForm`, `Params`, `FormValue` |
 | body | the struct behind `ShouldBindJSON` / `BodyParser` / `Decode`, with `json` names and `required` markers |
-| responses | status codes and literal `gin.H{}` / `fiber.Map{}` keys per exit |
+| responses | status codes and literal `gin.H{}` / `fiber.Map{}` keys per exit; net/http `WriteHeader` / `http.Error` and project helpers such as `utils.SendJSONResponse` count too, by signature or by the writer call inside them |
 | auth | a middleware in the chain whose name looks like auth, jwt, session, token or guard (labelled as inferred) |
 | data touched | `Table("…")` and `Model(&X{})` in the handler and its direct callees |
 | owner | `git log -1` for the file: author, short sha, age |

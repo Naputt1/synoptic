@@ -89,6 +89,7 @@ export function buildRouterScene(
   d: Data,
   focus: string,
   proto: 'all' | 'http' | 'ws' | 'sse' = 'all',
+  svc = '',
 ): Scene {
   const segs = segments(focus)
   const depth = segs.length
@@ -96,7 +97,8 @@ export function buildRouterScene(
   const edges: SEdge[] = []
 
   const colPath = new Map<number, string>()
-  const active = (r: Route) => (proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto)
+  const active = (r: Route) =>
+    (proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto) && (!svc || r.svc === svc)
 
   const under = (path: string) =>
     !focus || path === focus || path.startsWith(focus + '/') || focus.startsWith(path + '/')
@@ -455,8 +457,14 @@ export function buildPipelineScene(
 
   const last = r.ch.length
   const lastFlow = r.ch[last - 1]?.fk ? flows?.[r.ch[last - 1].fk!] : undefined
+  // the final status can come from a plain return or from a response helper
+  // card such as utils.SendJSONResponse(w, http.StatusOK, ...)
   const retCodes = [
-    ...new Set((lastFlow?.flow ?? []).filter((s) => s.k === 'ret').flatMap((s) => codesOf(s))),
+    ...new Set(
+      (lastFlow?.flow ?? [])
+        .filter((s) => (s.k === 'ret' || s.k === 'call') && codesOf(s).length)
+        .flatMap((s) => codesOf(s)),
+    ),
   ].sort()
   const earlyCodes = [...new Set(early.flatMap((e) => e.label.split(' · ')))].filter((c) =>
     /^\d{3}$/.test(c),

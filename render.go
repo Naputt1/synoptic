@@ -29,9 +29,19 @@ type JRoute struct {
 	F     string   `json:"f"`
 	L     int      `json:"l"`
 	Pr    string   `json:"pr,omitempty"`
+	Svc   string   `json:"svc,omitempty"`
 	St    *JStream `json:"st,omitempty"`
 	Chain []JStage `json:"ch"`
 	Doc   *JDoc    `json:"doc,omitempty"`
+}
+
+// JSvc is one entry point of a multi-service module, with what it owns.
+type JSvc struct {
+	N      string `json:"n"`
+	D      string `json:"d,omitempty"`
+	E      string `json:"e,omitempty"`
+	Routes int    `json:"routes"`
+	RPCs   int    `json:"rpcs"`
 }
 
 // JFunc is one node of the code graph: enough to draw its flow and its body.
@@ -45,6 +55,7 @@ type JFunc struct {
 	Steps []Step    `json:"flow,omitempty"`
 	In    []JInput  `json:"in,omitempty"`
 	Fx    []JEffect `json:"fx,omitempty"`
+	Rpc   string    `json:"rpc,omitempty"` // "si/mi" when this function implements a service method
 }
 
 type JStats struct {
@@ -66,6 +77,7 @@ type JData struct {
 	Mod      string                  `json:"mod"`
 	Stats    JStats                  `json:"stats"`
 	Routes   []JRoute                `json:"routes"`
+	Svcs     []JSvc                  `json:"svcs,omitempty"`
 	Services []JService              `json:"services,omitempty"`
 	Flows    map[string]JFunc        `json:"flows"`
 	Types    map[string]JType        `json:"types,omitempty"`
@@ -77,6 +89,13 @@ func buildData(m *Module, routes []*Route) JData {
 	groups := map[string]bool{}
 	mw := map[string]bool{}
 
+	if units := detectUnits(m); len(units) > 1 {
+		d.Svcs = make([]JSvc, len(units))
+		for i, u := range units {
+			d.Svcs[i] = JSvc{N: u.name, D: u.dir, E: u.entry}
+		}
+	}
+
 	types := buildTypeCatalog(m)
 	resolveDispatchedHandlers(m, routes, types)
 
@@ -87,6 +106,9 @@ func buildData(m *Module, routes []*Route) JData {
 			r.Proto = r.Stream.K
 		}
 		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line, Pr: r.Proto, St: r.Stream}
+		if len(d.Svcs) > 0 {
+			jr.Svc = svcForFile(d.Svcs, r.File.Rel)
+		}
 		if r.Stream != nil {
 			d.Stats.Streams++
 			switch r.Stream.K {
@@ -133,6 +155,31 @@ func buildData(m *Module, routes []*Route) JData {
 	})
 	indexStreamEvents(m, d.Flows, routes)
 	attachStreamOrigins(m, routes, d.Routes)
+
+	if len(d.Svcs) > 0 {
+		at := map[string]int{}
+		for i := range d.Svcs {
+			at[d.Svcs[i].N] = i
+		}
+		orphan := false
+		for _, jr := range d.Routes {
+			if jr.Svc == "" {
+				orphan = true
+				break
+			}
+			if i, ok := at[jr.Svc]; ok {
+				d.Svcs[i].Routes++
+			}
+		}
+		// A route registered outside every entry point means the split does not
+		// describe this repo; keep one surface rather than a misleading filter.
+		if orphan {
+			d.Svcs = nil
+			for i := range d.Routes {
+				d.Routes[i].Svc = ""
+			}
+		}
+	}
 
 	d.Stats.Routes = len(d.Routes)
 	d.Stats.Groups = len(groups)
@@ -301,6 +348,17 @@ func tagOf(c Call) string {
 	if isAuthReceiver(c.Expr) {
 		return "auth"
 	}
+	// A driver chain names the store in the middle, not the receiver:
+	// r.db.Collection(t).FindOne(...).Decode(&v) starts at "r".
+	parts := chainParts(c)
+	switch {
+	case hasPart(parts, dbWords):
+		return "db"
+	case hasPart(parts, cacheWords):
+		return "cache"
+	case hasPart(parts, netWords):
+		return "net"
+	}
 	switch c.Base {
 	case "DB", "db", "gorm", "Mongo", "mongo", "MongoClient":
 		return "db"
@@ -314,6 +372,50 @@ func tagOf(c Call) string {
 		return "db"
 	}
 	return ""
+}
+
+// callParts lists the selectors of a chained call in lower case:
+// r.db.Collection(t).FindOne(...).Decode -> [r db collection findone decode].
+func chainParts(c Call) []string {
+	parts := strings.Split(c.Qual+"."+c.Sel, ".")
+	for i, p := range parts {
+		parts[i] = strings.ToLower(strings.TrimSuffix(p, "()"))
+	}
+	return parts
+}
+
+func hasPart(parts []string, set map[string]bool) bool {
+	for _, p := range parts {
+		if set[p] {
+			return true
+		}
+	}
+	return false
+}
+
+var dbWords = map[string]bool{
+	"db": true, "mongo": true, "mongodb": true, "database": true, "collection": true,
+	"collections": true, "table": true, "tx": true, "gorm": true, "sql": true,
+	"sqlx": true, "postgres": true, "mysql": true, "pgx": true,
+}
+
+var cacheWords = map[string]bool{
+	"redis": true, "valkey": true, "cache": true, "rdb": true, "memcache": true, "memcached": true,
+}
+
+var netWords = map[string]bool{
+	"http": true, "https": true, "grpc": true, "client": true, "httpclient": true,
+}
+
+var dbReadOps = map[string]bool{
+	"findone": true, "find": true, "aggregate": true, "countdocuments": true,
+	"count": true, "distinct": true, "estimateddocumentcount": true, "watch": true,
+}
+
+var dbWriteOps = map[string]bool{
+	"insertone": true, "insertmany": true, "updateone": true, "updatemany": true,
+	"replaceone": true, "deleteone": true, "deletemany": true, "findoneandupdate": true,
+	"findoneanddelete": true, "bulkwrite": true, "exec": true,
 }
 
 func snippet(fn *Func, maxLines int) string {

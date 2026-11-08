@@ -105,7 +105,9 @@ func buildDoc(m *Module, r *Route) *JDoc {
 	var walk func([]Step)
 	walk = func(steps []Step) {
 		for _, s := range steps {
-			if s.Kind == "ret" || s.Kind == "exit" {
+			// a return, an exit, or a response helper such as
+			// utils.SendJSONResponse(w, http.StatusOK, ...)
+			if s.Kind == "ret" || s.Kind == "exit" || len(stepCodes(s)) > 0 {
 				codes := stepCodes(s)
 				if len(codes) == 0 {
 					codes = []string{"—"}

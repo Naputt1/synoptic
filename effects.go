@@ -48,6 +48,15 @@ func buildEffects(fn *Func) []JEffect {
 			return true
 		}
 		name := strings.TrimPrefix(d.Base+"."+d.Sel, ".")
+		if g := storeGroup(d); g != "" {
+			// r.db.Collection(t).FindOne(...) reads as db.FindOne, not r.FindOne
+			for _, p := range chainParts(d) {
+				if (g == "db" && dbWords[p]) || (g == "cache" && cacheWords[p]) {
+					name = p + "." + d.Sel
+					break
+				}
+			}
+		}
 		at := line(ce.Pos())
 		// Calls are kept per source line: the SSE loop writes the preamble,
 		// every event, and a heartbeat from three different lines.
@@ -85,6 +94,16 @@ func effectKind(c Call) (string, string) {
 	if strings.Contains(c.Expr, ".Header().Set") {
 		return "", ""
 	}
+	// Store chains name the operation last: r.db.Collection(t).FindOne(...) is a
+	// read even though the receiver is just "r".
+	if g := storeGroup(c); g != "" {
+		switch {
+		case dbWriteOps[sel]:
+			return "write", g
+		case dbReadOps[sel]:
+			return "read", g
+		}
+	}
 	switch sel {
 	case "newEvent", "ssevent", "sseventwithtype", "publish", "publishevent", "broadcast",
 		"broadcastevent", "broadcastto", "broadcastuser", "sendevent", "notify", "enqueue":
@@ -104,6 +123,19 @@ func effectKind(c Call) (string, string) {
 		return "read", effectGroup(c)
 	}
 	return "", ""
+}
+
+// storeGroup names the store a chained call touches: the operation sits at the
+// end of the chain, the store in the middle.
+func storeGroup(c Call) string {
+	parts := chainParts(c)
+	switch {
+	case hasPart(parts, cacheWords):
+		return "cache"
+	case hasPart(parts, dbWords):
+		return "db"
+	}
+	return ""
 }
 
 func effectGroup(c Call) string {

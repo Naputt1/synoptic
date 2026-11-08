@@ -58,6 +58,14 @@ const useData = () => {
   return d
 }
 
+/** Selected service of a multi-entry module; '' means every service. */
+const SvcCtx = createContext<{ svc: string; setSvc: (v: string) => void }>({
+  svc: '',
+  setSvc: () => {},
+})
+const useSvc = () => useContext(SvcCtx).svc
+const useSvcSwitch = () => useContext(SvcCtx)
+
 /* ---------- crumbs ---------- */
 
 type Crumb = { label: string; href?: string }
@@ -177,6 +185,28 @@ function useCrumbs(): Crumb[] {
 
 function Topbar({ onSearch }: { onSearch: () => void }) {
   const data = useData()
+  const svc = useSvc()
+  const { setSvc } = useSvcSwitch()
+  const scope = useMemo(() => {
+    if (!svc) {
+      return {
+        routes: data.stats.routes,
+        streams: data.stats.streams ?? 0,
+        services: data.stats.services ?? 0,
+        rpcs: data.stats.rpcs ?? 0,
+        documented: data.stats.documented,
+      }
+    }
+    const routes = data.routes.filter((r) => r.svc === svc)
+    const services = (data.services ?? []).filter((s) => s.svc === svc)
+    return {
+      routes: routes.length,
+      streams: routes.filter((r) => r.pr || r.st).length,
+      services: services.length,
+      rpcs: services.reduce((n, s) => n + s.methods.length, 0),
+      documented: routes.filter((r) => r.ch.some((st) => st.r === 'handler' && st.d)).length,
+    }
+  }, [svc, data])
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const parts = pathname.split('/').filter(Boolean)
   const level =
@@ -208,33 +238,49 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
       </div>
       <div className="text-mut hidden gap-x-3 text-[10.5px] sm:flex">
         <span>
-          <b className="text-ink font-semibold">{data.stats.routes}</b> routes
+          <b className="text-ink font-semibold">{scope.routes}</b> routes
         </span>
-        {(data.stats.streams ?? 0) > 0 && (
+        {scope.streams > 0 && (
           <span>
-            <b className="text-ink font-semibold">{data.stats.streams}</b> stream
-            {data.stats.streams === 1 ? '' : 's'}
+            <b className="text-ink font-semibold">{scope.streams}</b> stream
+            {scope.streams === 1 ? '' : 's'}
           </span>
         )}
-        {(data.stats.services ?? 0) > 0 && (
+        {scope.services > 0 && (
           <span>
-            <b className="text-ink font-semibold">{data.stats.services}</b> rpc ·{' '}
-            <b className="text-ink font-semibold">{data.stats.rpcs}</b>{' '}
-            {data.stats.rpcs === 1 ? 'method' : 'methods'}
+            <b className="text-ink font-semibold">{scope.services}</b> rpc ·{' '}
+            <b className="text-ink font-semibold">{scope.rpcs}</b>{' '}
+            {scope.rpcs === 1 ? 'method' : 'methods'}
           </span>
         )}
         <span>
           <b className="text-ink font-semibold">{data.stats.middleware}</b> middleware
         </span>
         <span>
-          <b className="text-ink font-semibold">{data.stats.documented}</b>/{data.stats.routes}{' '}
-          documented
+          <b className="text-ink font-semibold">{scope.documented}</b>/{scope.routes} documented
         </span>
         <span>
           <b className="text-ink font-semibold">{data.stats.funcs}</b> flows
         </span>
       </div>
       <div className="ml-auto flex flex-wrap items-center gap-3">
+        {(data.svcs?.length ?? 0) > 1 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">service</span>
+            <Segmented
+              value={svc || 'all'}
+              onChange={(v) => setSvc(v === 'all' ? '' : v)}
+              options={[
+                { value: 'all', label: 'all', title: `${data.stats.routes} routes` },
+                ...(data.svcs ?? []).map((s) => ({
+                  value: s.n,
+                  label: s.n,
+                  title: `${s.routes} routes · ${s.rpcs} rpc · ${s.e}`,
+                })),
+              ]}
+            />
+          </div>
+        )}
         <div className="flex items-center gap-1.5">
           <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">level</span>
           <Segmented
@@ -247,16 +293,22 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
             ]}
           />
         </div>
-        {(data.stats.services ?? 0) > 0 && (
-          <AppLink
-            href="/rpc"
-            className={buttonVariants({
-              variant: parts[0] === 'rpc' ? 'default' : 'ghost',
-              size: 'sm',
-            })}
-          >
-            rpc <span className="text-[10px] opacity-70">{data.stats.rpcs}</span>
-          </AppLink>
+        {scope.services > 0 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">surface</span>
+            <Segmented
+              value={parts[0] === 'rpc' ? 'rpc' : 'http'}
+              onChange={(v) => goto(v === 'rpc' ? '/rpc' : '/')}
+              options={[
+                { value: 'http', label: 'http', title: `${scope.routes} routes` },
+                {
+                  value: 'rpc',
+                  label: `rpc ${scope.rpcs}`,
+                  title: `${scope.services} services · ${scope.rpcs} methods`,
+                },
+              ]}
+            />
+          </div>
         )}
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
@@ -271,6 +323,7 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
 
 function Crumbs() {
   const crumbs = useCrumbs()
+  const svc = useSvc()
   return (
     <div className="border-line text-mut flex flex-wrap items-center gap-x-1.5 gap-y-1 border-b px-4 py-1.5 text-[11px]">
       <Button
@@ -293,6 +346,14 @@ function Crumbs() {
           )}
         </span>
       ))}
+      {svc && (
+        <span
+          className="border-line text-faint ml-1 rounded-[3px] border px-1 py-px text-[10px]"
+          title="routes and rpc services are filtered to this entry point"
+        >
+          service {svc}
+        </span>
+      )}
     </div>
   )
 }
@@ -300,6 +361,7 @@ function Crumbs() {
 function Shell() {
   const data = useData()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [svc, setSvc] = useState('')
   const [toast, setToast] = useState<{ id: number; text: string; tone: 'ok' | 'bad' } | null>(null)
 
   useEffect(() => {
@@ -352,31 +414,33 @@ function Shell() {
   }, [searchOpen])
 
   return (
-    <div className="bg-canvas flex h-full flex-col">
-      <Topbar onSearch={() => setSearchOpen(true)} />
-      <Crumbs />
-      <div className="relative min-h-0 flex-1">
-        <Outlet />
-      </div>
-      <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
-        click any box to open it · right-click for actions · esc goes back · ⌘K searches
-      </div>
-      {toast && (
-        <div
-          key={toast.id}
-          role="status"
-          aria-live="polite"
-          className={`toast-in pointer-events-none fixed inset-x-0 bottom-9 z-[70] mx-auto w-fit rounded-[5px] border px-3 py-1.5 text-[11px] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.9)] ${
-            toast.tone === 'bad'
-              ? 'border-bad/45 bg-bad/10 text-bad'
-              : 'border-line bg-panel2 text-ink'
-          }`}
-        >
-          {toast.text}
+    <SvcCtx.Provider value={{ svc, setSvc }}>
+      <div className="bg-canvas flex h-full flex-col">
+        <Topbar onSearch={() => setSearchOpen(true)} />
+        <Crumbs />
+        <div className="relative min-h-0 flex-1">
+          <Outlet />
         </div>
-      )}
-      <SearchDialog data={data} open={searchOpen} onOpenChange={setSearchOpen} />
-    </div>
+        <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
+          click any box to open it · right-click for actions · esc goes back · ⌘K searches
+        </div>
+        {toast && (
+          <div
+            key={toast.id}
+            role="status"
+            aria-live="polite"
+            className={`toast-in pointer-events-none fixed inset-x-0 bottom-9 z-[70] mx-auto w-fit rounded-[5px] border px-3 py-1.5 text-[11px] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.9)] ${
+              toast.tone === 'bad'
+                ? 'border-bad/45 bg-bad/10 text-bad'
+                : 'border-line bg-panel2 text-ink'
+            }`}
+          >
+            {toast.text}
+          </div>
+        )}
+        <SearchDialog data={data} open={searchOpen} onOpenChange={setSearchOpen} svc={svc} />
+      </div>
+    </SvcCtx.Provider>
   )
 }
 
@@ -424,6 +488,7 @@ function ScopeCard({
   tags,
   onSource,
   sourceLabel,
+  rpc,
 }: {
   title: string
   badge?: string
@@ -433,6 +498,7 @@ function ScopeCard({
   tags?: string[]
   onSource?: () => void
   sourceLabel?: string
+  rpc?: { label: string; href: string }
 }) {
   return (
     <div className="border-line bg-panel/40 flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-4 py-2">
@@ -450,6 +516,15 @@ function ScopeCard({
         {doc && <p className="text-ink/80 mt-1 line-clamp-2 text-[11.5px] leading-[1.5]">{doc}</p>}
         {note && <p className="text-faint mt-1 text-[11px] leading-[1.5] italic">{note}</p>}
       </div>
+      {rpc && (
+        <AppLink
+          href={rpc.href}
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          title={`${rpc.label} on the RPC surface`}
+        >
+          rpc · {rpc.label}
+        </AppLink>
+      )}
       {onSource && (
         <Button variant="outline" size="sm" onClick={onSource}>
           <Code2 className="size-3" /> {sourceLabel ?? 'source'}
@@ -1318,16 +1393,23 @@ function StreamBoard({
 
 function RouterView() {
   const data = useData()
+  const svc = useSvc()
   const params = useParams({ strict: false }) as { _splat?: string }
   const focus = params._splat ?? ''
   const [proto, setProto] = useState<'all' | 'http' | 'ws' | 'sse'>('all')
-  const scene = useMemo(() => buildRouterScene(data, focus, proto), [data, focus, proto])
+  const scene = useMemo(
+    () => buildRouterScene(data, focus, proto, svc),
+    [data, focus, proto, svc],
+  )
   const label = focus ? '/' + focus : data.repo
   const count = data.routes.filter(
     (r) =>
       (proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto) &&
+      (!svc || r.svc === svc) &&
       (focus ? r.p === '/' + focus || r.p.startsWith('/' + focus + '/') : true),
   ).length
+  const rpcServices = (data.services ?? []).filter((s) => !svc || s.svc === svc)
+  const rpcCount = rpcServices.reduce((n, s) => n + s.methods.length, 0)
 
   return (
     <GraphPage
@@ -1356,6 +1438,19 @@ function RouterView() {
               {count} {count === 1 ? 'route' : 'routes'}
             </span>
           </div>
+          {rpcCount > 0 && (
+            <AppLink
+              href="/rpc"
+              className="border-line hover:bg-panel flex flex-wrap items-center gap-x-2 border-b px-4 py-1.5 text-[11px]"
+            >
+              <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">rpc</span>
+              <span className="text-ink font-semibold">
+                {rpcServices.length} {rpcServices.length === 1 ? 'service' : 'services'}
+              </span>
+              <span className="text-mut">{rpcCount} methods</span>
+              <span className="text-acc ml-auto">open gRPC surface ›</span>
+            </AppLink>
+          )}
         </>
       }
     />
@@ -1607,6 +1702,15 @@ function FnView() {
     return () => window.removeEventListener('synoptic:source', onSrc)
   }, [])
 
+  const rpc = useMemo(() => {
+    const [si, mi] = (flow?.rpc ?? '').split('/').map(Number)
+    const svc = data.services?.[si]
+    const m = svc?.methods[mi]
+    if (!svc || !m) return undefined
+    const name = svc.n.includes('.') ? svc.n.slice(svc.n.lastIndexOf('.') + 1) : svc.n
+    return { label: `${name}/${m.n}`, href: `/rpc/${si}/${mi}` }
+  }, [flow, data])
+
   if (!flow)
     return <div className="text-faint p-6 text-[12px]">this function is not in the module</div>
 
@@ -1629,6 +1733,7 @@ function FnView() {
             setSheet(true)
           }}
           sourceLabel="source"
+          rpc={rpc}
         />
       }
     >
@@ -1857,10 +1962,19 @@ function RpcCell({ label, value }: { label: string; value?: string }) {
 
 function RPCView() {
   const data = useData()
-  const services = data.services ?? []
+  const svc = useSvc()
+  const services = (data.services ?? []).map((s, si) => ({ s, si }))
+  const shown = services.filter(({ s }) => !svc || s.svc === svc)
   if (services.length === 0) {
     return (
       <div className="text-faint p-6 text-[12px]">no gRPC services were found in this module</div>
+    )
+  }
+  if (shown.length === 0) {
+    return (
+      <div className="text-faint p-6 text-[12px]">
+        no gRPC services in {svc} — switch the service filter back to all
+      </div>
     )
   }
   return (
@@ -1868,11 +1982,13 @@ function RPCView() {
       <div className="mb-3 flex items-baseline gap-2">
         <span className="text-ink text-[13px]">RPC</span>
         <span className="text-faint text-[10.5px]">
-          {services.length} services · {services.reduce((n, s) => n + s.methods.length, 0)} methods
+          {shown.length} {shown.length === 1 ? 'service' : 'services'} ·{' '}
+          {shown.reduce((n, { s }) => n + s.methods.length, 0)} methods
+          {svc ? ` · ${svc}` : ''}
         </span>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
-        {services.map((s, si) => (
+        {shown.map(({ s, si }) => (
           <section
             key={s.n}
             className="border-line bg-panel/30 overflow-hidden rounded-[6px] border"

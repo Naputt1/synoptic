@@ -180,18 +180,29 @@ export function buildFlowScene(
               ? codesLabel(s)
                 ? `${codesLabel(s)} out`
                 : 'exits'
-              : s.g
-                ? s.g
-                : undefined,
-        tags: kind === 'exit' && s.g ? [s.g] : undefined,
+              : kind === 'call'
+                ? codesLabel(s) || s.g
+                : s.g
+                  ? s.g
+                  : undefined,
+        tags:
+          kind === 'exit'
+            ? s.g
+              ? [s.g]
+              : undefined
+            : kind === 'call' && codesLabel(s) && s.g
+              ? [s.g]
+              : undefined,
         rk: kind === 'exit' ? s.rk : undefined,
         index: idx,
         jump: Boolean(jump),
         href: jump
           ? jump.href
-          : s.fk
-            ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined)
-            : undefined,
+          : s.rpc
+            ? `/rpc/${s.rpc}`
+            : s.fk
+              ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined)
+              : undefined,
         line: s.l,
         lines: s.ls && s.ls.length > 1 ? s.ls : s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,

@@ -29,6 +29,10 @@ type Step struct {
 	Count   int      `json:"c,omitempty"`
 	Body    []Step   `json:"b,omitempty"`
 	Else    []Step   `json:"e,omitempty"`
+
+	Rpc   string `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
+	Iface string `json:"-"`             // declared type of the field the call goes through
+	Sel   string `json:"-"`             // method name on that field
 }
 
 func buildFlow(f *Func) []Step {
@@ -132,6 +136,8 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 						st.Text = cs.Text
 						st.Tag = cs.Tag
 						st.Key = cs.Key
+						st.Iface = cs.Iface
+						st.Sel = cs.Sel
 						st.File = cs.File
 						st.Line = cs.Line
 						st.Sub = "if " + exprText(x.Cond)
@@ -207,6 +213,20 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 			if len(x.Results) > 0 {
 				if ce := firstCall(x.Results[0]); ce != nil {
 					setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
+					if c, ok := describeCall(ce); ok {
+						if resolved, known := calls[c.Expr]; known {
+							c = resolved
+						}
+						st.Iface = c.Iface
+						st.Sel = c.Sel
+						if strings.HasSuffix(c.Iface, "Client") {
+							st.Tag = "rpc"
+						}
+						if c.Target != nil {
+							st.File = f.File.Rel
+							st.Key = c.Target.Key
+						}
+					}
 				}
 			} else if i > 0 {
 				// writeStoreError(...); return — the writer above already gave
@@ -239,11 +259,13 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 			// can fail on top, the guard below, and the card opens the call.
 			if i+1 < len(list) && len(x.Rhs) == 1 {
 				if next, isIf := list[i+1].(*ast.IfStmt); isIf {
-					if ex, isExit := exitOf(f, next, calls); isExit && len(errorNames(x.Lhs)) > 0 && !afterHandoff(f, next.Pos()) {
+					if ex, isExit := exitOf(f, next, calls); isExit && len(guardNames(x.Lhs, next.Cond)) > 0 && !afterHandoff(f, next.Pos()) {
 						if cs := callStep(f, x.Rhs[0], calls); cs.Kind == "call" {
 							ex.Text = cs.Text
 							ex.Tag = cs.Tag
 							ex.Key = cs.Key
+							ex.Iface = cs.Iface
+							ex.Sel = cs.Sel
 							ex.File = cs.File
 							ex.Line = cs.Line
 							ex.Sub = "if " + exprText(next.Cond)
@@ -255,9 +277,9 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 					}
 					// a fork with more than one way out is still one card: keep
 					// the call and the condition together, then show its body
-					if refersTo(next.Cond, errorNames(x.Lhs)) {
+					if refersTo(next.Cond, guardNames(x.Lhs, next.Cond)) {
 						if cs := callStep(f, x.Rhs[0], calls); cs.Kind == "call" {
-							st := Step{Kind: "if", Text: cs.Text, Sub: "if " + exprText(next.Cond), Tag: cs.Tag, Key: cs.Key, File: cs.File, Line: cs.Line, SubLine: line(next.Pos())}
+							st := Step{Kind: "if", Text: cs.Text, Sub: "if " + exprText(next.Cond), Tag: cs.Tag, Key: cs.Key, Iface: cs.Iface, Sel: cs.Sel, File: cs.File, Line: cs.Line, SubLine: line(next.Pos())}
 							st.Body = flowSteps(f, next.Body.List)
 							if next.Else != nil {
 								switch e := next.Else.(type) {
@@ -347,7 +369,17 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 		c = resolved
 	}
 
-	if isResponseCall(c) {
+	// A project helper such as utils.SendJSONResponse stays a named card: it
+	// carries a status and still opens its own flow.
+	if writesResponse(c) {
+		st := Step{Kind: "call", Text: exprText(ce), Line: line(ce.Pos())}
+		setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
+		st.Sub = altPkg(c.Target.PkgPath)
+		st.File = f.File.Rel
+		st.Key = c.Target.Key
+		return st
+	}
+	if isResponseCall(c) || isResponsePrimitive(c) {
 		st := Step{Kind: "ret", Text: exprText(ce), Line: line(ce.Pos())}
 		setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
 		return st
@@ -367,17 +399,18 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 	if c.Sel == "Flush" || strings.HasSuffix(c.Expr, ".Flush()") {
 		return Step{Kind: "call", Text: exprText(ce), Sub: "stream flush", File: f.File.Rel, Line: line(ce.Pos())}
 	}
-	if c.Sel == "WriteHeader" {
-		return Step{Kind: "call", Text: exprText(ce), Sub: "response status", File: f.File.Rel, Line: line(ce.Pos())}
+	tag := tagOf(c)
+	if strings.HasSuffix(c.Iface, "Client") {
+		tag = "rpc"
 	}
 	if !known && isNoise(c) {
 		return Step{}
 	}
-	if !known && c.Target == nil && c.PkgPath == "" && tagOf(c) == "" {
+	if !known && c.Target == nil && c.PkgPath == "" && tag == "" {
 		return Step{}
 	}
 
-	st := Step{Kind: "call", Text: exprText(ce), Tag: tagOf(c), Line: line(ce.Pos())}
+	st := Step{Kind: "call", Text: exprText(ce), Tag: tag, Line: line(ce.Pos()), Iface: c.Iface, Sel: c.Sel}
 	if c.Target != nil {
 		st.Sub = altPkg(c.Target.PkgPath)
 		st.File = f.File.Rel
@@ -463,6 +496,8 @@ func firstCall(e ast.Expr) *ast.CallExpr {
 		return firstCall(x.X)
 	case *ast.IndexExpr:
 		return firstCall(x.X)
+	case *ast.IndexListExpr:
+		return firstCall(x.X)
 	case *ast.TypeAssertExpr:
 		return firstCall(x.X)
 	case *ast.StarExpr:
@@ -489,6 +524,60 @@ func isResponseCall(c Call) bool {
 		switch c.Sel {
 		case "JSON", "JSONPretty", "JSONBlob", "XML", "XMLPretty", "XMLBlob", "HTML", "HTMLBlob",
 			"String", "Blob", "Stream", "File", "Attachment", "Inline", "NoContent", "Redirect", "Error":
+			return true
+		}
+	}
+	return false
+}
+
+// isResponsePrimitive is the net/http write itself, as opposed to a framework
+// wrapper: w.WriteHeader(code), w.WriteHeaderNow() and http.Error(w, msg, code).
+func isResponsePrimitive(c Call) bool {
+	switch c.Sel {
+	case "WriteHeader", "WriteHeaderNow":
+		return c.Base != "" && c.Expr == c.Base+"."+c.Sel
+	case "Error":
+		return c.PkgPath == "net/http"
+	}
+	return false
+}
+
+// writesResponse reports whether a resolved helper funnels into the response
+// writer, as utils.SendJSONResponse does. A helper that takes an
+// http.ResponseWriter is a response writer by signature; one that calls a
+// writer is recognized by its body, two calls deep at most.
+func writesResponse(c Call) bool {
+	if c.Target == nil {
+		return false
+	}
+	if responseWriterParam(c.Target) {
+		return true
+	}
+	return bodyWritesResponse(c.Target, 0, map[*Func]bool{})
+}
+
+func responseWriterParam(fn *Func) bool {
+	if fn.Decl == nil || fn.Decl.Type.Params == nil {
+		return false
+	}
+	for _, fld := range fn.Decl.Type.Params.List {
+		if strings.Contains(typeString(fld.Type), "ResponseWriter") {
+			return true
+		}
+	}
+	return false
+}
+
+func bodyWritesResponse(fn *Func, depth int, seen map[*Func]bool) bool {
+	if fn == nil || depth > 2 || seen[fn] {
+		return false
+	}
+	seen[fn] = true
+	for _, c := range fn.Calls {
+		if isResponseCall(c) || isResponsePrimitive(c) {
+			return true
+		}
+		if bodyWritesResponse(c.Target, depth+1, seen) {
 			return true
 		}
 	}
@@ -565,6 +654,8 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 				}
 				st.Text = exprText(ce)
 				st.Tag = tagOf(c)
+				st.Iface = c.Iface
+				st.Sel = c.Sel
 				if c.Target != nil && c.Target.Key != "" {
 					st.Key = c.Target.Key
 				}
@@ -617,10 +708,53 @@ func (w *statusWalk) callStatuses(ce *ast.CallExpr, calls map[string]Call, fn *F
 	if isResponseCall(c) {
 		return w.statusArgs(ce.Args, fn, bind)
 	}
+	switch {
+	case c.Sel == "WriteHeader" && c.Base != "" && c.Expr == c.Base+"."+c.Sel:
+		if len(ce.Args) == 0 {
+			return nil
+		}
+		return w.statusArg(ce.Args[0], fn, bind, map[string]bool{})
+	case c.Sel == "WriteHeaderNow":
+		return map[string]bool{"200": true}
+	case c.Sel == "Error" && c.PkgPath == "net/http":
+		if len(ce.Args) < 3 {
+			return nil
+		}
+		return w.statusArg(ce.Args[2], fn, bind, map[string]bool{})
+	}
 	if c.Target == nil {
 		return nil
 	}
+	if set := w.namedStatusArg(c.Target, ce.Args, fn, bind); len(set) > 0 {
+		return set
+	}
 	return w.bodyStatuses(c.Target, w.bindArgs(c.Target, ce.Args, fn, bind))
+}
+
+// namedStatusArg reads a helper's own status parameter from the call site, so
+// SendJSONResponse(w, 401, …) answers 401 rather than every fallback branch
+// inside the helper's body.
+func (w *statusWalk) namedStatusArg(fn *Func, args []ast.Expr, caller *Func, bind map[string]map[string]bool) map[string]bool {
+	if fn == nil || fn.Decl == nil || fn.Decl.Type.Params == nil {
+		return nil
+	}
+	i := 0
+	for _, fld := range fn.Decl.Type.Params.List {
+		for _, name := range fld.Names {
+			idx := i
+			i++
+			if idx >= len(args) {
+				return nil
+			}
+			switch strings.ToLower(name.Name) {
+			case "status", "statuscode", "code", "httpstatus", "httpstatuscode":
+				if set := w.statusArg(args[idx], caller, bind, map[string]bool{}); len(set) > 0 {
+					return set
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // bodyStatuses unions every status the function's body can write, including
@@ -922,6 +1056,44 @@ func errorNames(lhs []ast.Expr) []string {
 		}
 	}
 	return names
+}
+
+// guardNames lets a call merge with its guard when the guard tests an error
+// result, or a boolean result such as `claim, ok := …; if !ok`.
+func guardNames(lhs []ast.Expr, cond ast.Expr) []string {
+	names := errorNames(lhs)
+	if cond == nil {
+		return names
+	}
+	for _, e := range lhs {
+		id, ok := e.(*ast.Ident)
+		if !ok || id.Name == "_" {
+			continue
+		}
+		if isNegated(cond, id.Name) {
+			names = append(names, id.Name)
+		}
+	}
+	return names
+}
+
+// isNegated matches `!name` and `name == false`, the two ways Go writes a
+// failed boolean check.
+func isNegated(e ast.Expr, name string) bool {
+	switch x := e.(type) {
+	case *ast.UnaryExpr:
+		id, ok := x.X.(*ast.Ident)
+		return x.Op == token.NOT && ok && id.Name == name
+	case *ast.BinaryExpr:
+		if x.Op != token.EQL && x.Op != token.NEQ {
+			return false
+		}
+		left, lok := x.X.(*ast.Ident)
+		right, rok := x.Y.(*ast.Ident)
+		return (lok && left.Name == name && rok && right.Name == "false") ||
+			(rok && right.Name == name && lok && left.Name == "false")
+	}
+	return false
 }
 
 func refersTo(e ast.Expr, names []string) bool {

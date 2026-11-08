@@ -133,6 +133,7 @@ export type Route = {
   f: string
   l: number
   pr?: 'ws' | 'sse'
+  svc?: string
   st?: StreamInfo
   ch: Stage[]
   doc?: Doc
@@ -183,6 +184,7 @@ export type Service = {
   f?: string
   l?: number
   d?: string
+  svc?: string
   mw?: Stage[]
   methods: ServiceMethod[]
 }
@@ -205,6 +207,7 @@ export type Step = {
   c?: number
   b?: Step[]
   e?: Step[]
+  rpc?: string
 }
 
 export type FuncFlow = {
@@ -217,6 +220,7 @@ export type FuncFlow = {
   flow?: Step[]
   in?: Input[]
   fx?: Effect[]
+  rpc?: string
 }
 
 export type StageTiming = {
@@ -262,11 +266,15 @@ export type SynType = {
   impls?: string[]
 }
 
+/** One entry point of a multi-service module, with what it owns. */
+export type Svc = { n: string; d?: string; e?: string; routes: number; rpcs: number }
+
 export type Data = {
   repo: string
   mod: string
   stats: Stats
   routes: Route[]
+  svcs?: Svc[]
   services?: Service[]
   mw: Middleware[]
   flows: Record<string, FuncFlow>

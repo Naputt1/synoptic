@@ -16,6 +16,7 @@ type JService struct {
 	F       string           `json:"f,omitempty"`
 	L       int              `json:"l,omitempty"`
 	D       string           `json:"d,omitempty"`
+	Svc     string           `json:"svc,omitempty"`
 	Mw      []JStage         `json:"mw,omitempty"`
 	Methods []JServiceMethod `json:"methods"`
 }
@@ -126,6 +127,14 @@ func buildServices(m *Module) []JService {
 			}
 			impl := g.exprType(fn, ce.Args[1])
 			implMethods := g.methodsOf(impl)
+			if len(implMethods) == 0 {
+				// Factories usually return the service interface, not the
+				// concrete type, so match the implementation structurally.
+				if typ := g.implByIface(sigs); typ != "" {
+					impl = typ
+					implMethods = g.methodsOf(typ)
+				}
+			}
 
 			svc := byName[name]
 			if svc == nil {
@@ -235,6 +244,62 @@ func (g *grpcIndex) methodsOf(typ string) map[string]*Func {
 		}
 	}
 	return out
+}
+
+// implByIface finds the concrete type registered for a service when the
+// registration expression only names the interface. Exported interface
+// methods must all be present; generated stubs and the Unimplemented embed are
+// skipped because they match every service by name alone.
+func (g *grpcIndex) implByIface(sigs []ifaceMethod) string {
+	want := map[string]bool{}
+	for _, s := range sigs {
+		if s.Name == "" || s.Name[0] < 'A' || s.Name[0] > 'Z' {
+			continue
+		}
+		want[s.Name] = true
+	}
+	if len(want) == 0 {
+		return ""
+	}
+	best, bestExtra := "", -1
+	for typ, fns := range g.m.ByRecv {
+		if strings.HasPrefix(typ, "Unimplemented") || generatedOnly(fns) {
+			continue
+		}
+		have := map[string]bool{}
+		for _, f := range fns {
+			have[f.Name] = true
+		}
+		missing := false
+		for name := range want {
+			if !have[name] {
+				missing = true
+				break
+			}
+		}
+		if missing {
+			continue
+		}
+		extra := len(fns) - len(want)
+		if bestExtra < 0 || extra < bestExtra || (extra == bestExtra && typ < best) {
+			best, bestExtra = typ, extra
+		}
+	}
+	return best
+}
+
+// generatedOnly reports whether every method on the receiver came from a
+// generated protobuf file, which is how client stubs look.
+func generatedOnly(fns []*Func) bool {
+	if len(fns) == 0 {
+		return true
+	}
+	for _, f := range fns {
+		if f.File == nil || !strings.HasSuffix(f.File.Rel, ".pb.go") {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *grpcIndex) exprType(fn *Func, e ast.Expr) string {
@@ -589,14 +654,53 @@ func (g *grpcIndex) refFn(fn *Func, e ast.Expr) *Func {
 
 func attachServices(m *Module, d *JData, services []JService) {
 	if len(services) == 0 {
+		pruneSvcs(d)
 		return
 	}
 	d.Services = services
 	d.Stats.Services = len(services)
+	if len(d.Svcs) > 0 {
+		orphan := false
+		for si := range d.Services {
+			s := svcForFile(d.Svcs, d.Services[si].F)
+			if s == "" {
+				orphan = true
+			}
+			d.Services[si].Svc = s
+		}
+		if orphan {
+			d.Svcs = nil
+			for si := range d.Services {
+				d.Services[si].Svc = ""
+			}
+			for i := range d.Routes {
+				d.Routes[i].Svc = ""
+			}
+		} else {
+			at := map[string]int{}
+			for i := range d.Svcs {
+				at[d.Svcs[i].N] = i
+			}
+			for si := range d.Services {
+				if i, ok := at[d.Services[si].Svc]; ok {
+					d.Svcs[i].RPCs += len(d.Services[si].Methods)
+				}
+			}
+		}
+	}
+	fkRPC := map[string]string{}
+	ifaceRPC := map[string]string{}
 	for si := range d.Services {
+		short := shortServiceName(d.Services[si].N)
 		d.Stats.RPCs += len(d.Services[si].Methods)
 		for mi := range d.Services[si].Methods {
-			if fn := d.Services[si].Methods[mi].fn; fn != nil {
+			md := d.Services[si].Methods[mi]
+			ref := strconv.Itoa(si) + "/" + strconv.Itoa(mi)
+			ifaceRPC[short+"."+md.N] = ref
+			if md.Fk != "" {
+				fkRPC[md.Fk] = ref
+			}
+			if fn := md.fn; fn != nil {
 				indexFunc(m, d.Flows, fn, 0)
 			}
 		}
@@ -606,7 +710,57 @@ func attachServices(m *Module, d *JData, services []JService) {
 	}
 	for key, jf := range d.Flows {
 		annotateSteps(jf.Steps, d.Types)
+		linkRPSSteps(jf.Steps, ifaceRPC)
+		if ref, ok := fkRPC[key]; ok {
+			jf.Rpc = ref
+		}
 		d.Flows[key] = jf
 	}
 	d.Stats.Funcs = len(d.Flows)
+	pruneSvcs(d)
+}
+
+// pruneSvcs drops entry points that own neither a route nor an RPC, so a cmd
+// directory that only starts a queue worker does not show as an empty surface.
+func pruneSvcs(d *JData) {
+	if len(d.Svcs) == 0 {
+		return
+	}
+	kept := d.Svcs[:0]
+	for _, s := range d.Svcs {
+		if s.Routes+s.RPCs > 0 {
+			kept = append(kept, s)
+		}
+	}
+	d.Svcs = kept
+}
+
+// shortServiceName turns jobpb.JobService into JobService, to match the
+// generated client interface a handler holds: jobpb.JobServiceClient.
+func shortServiceName(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+// linkRPSSteps points calls made through a generated gRPC client interface at
+// the service method, so an HTTP flow can cross into the RPC surface.
+func linkRPSSteps(steps []Step, idx map[string]string) {
+	for i := range steps {
+		st := &steps[i]
+		if st.Iface != "" {
+			name := strings.TrimPrefix(st.Iface, "*")
+			if k := strings.LastIndex(name, "."); k >= 0 {
+				name = name[k+1:]
+			}
+			if strings.HasSuffix(name, "Client") {
+				if ref, ok := idx[strings.TrimSuffix(name, "Client")+"."+st.Sel]; ok {
+					st.Rpc = ref
+				}
+			}
+		}
+		linkRPSSteps(st.Body, idx)
+		linkRPSSteps(st.Else, idx)
+	}
 }

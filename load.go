@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -21,8 +22,10 @@ type FileCtx struct {
 
 type Call struct {
 	Base    string // first identifier of the chain, e.g. "config" in config.DB.Table
+	Qual    string // receiver expression, e.g. "s.userStatusService" in s.userStatusService.GetUser
 	Sel     string // last identifier, e.g. "Table"
 	Expr    string // full chain as written
+	Iface   string // declared type of the field the call goes through, when that field is not a struct
 	Line    int
 	PkgPath string
 	Target  *Func
@@ -42,15 +45,26 @@ type Func struct {
 	Calls   []Call
 }
 
+// FieldRef is a struct field's declared type, already resolved through the
+// imports of the file that declares the struct — so a caller file that does not
+// import that package still finds the method.
+type FieldRef struct {
+	Pkg  string
+	Name string
+	Text string
+}
+
 type Module struct {
 	Root    string
 	Path    string
 	Name    string
 	Files   []*FileCtx
 	Funcs   map[string]*Func
-	PKG     map[string]map[string]*Func // pkgPath -> name -> package level func
-	Methods map[string][]*Func          // method name -> every method with that name
-	ByRecv  map[string][]*Func          // receiver type -> methods
+	PKG     map[string]map[string]*Func    // pkgPath -> name -> package level func
+	Methods map[string][]*Func             // method name -> every method with that name
+	ByRecv  map[string][]*Func             // receiver type -> methods
+	Fields  map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
+	Ifaces  map[string][]string            // "pkg|Interface" -> exported method names
 	PkgDocs map[string]string
 }
 
@@ -71,10 +85,13 @@ func loadModule(root string) (*Module, error) {
 		PKG:     map[string]map[string]*Func{},
 		Methods: map[string][]*Func{},
 		ByRecv:  map[string][]*Func{},
+		Fields:  map[string]map[string]FieldRef{},
+		Ifaces:  map[string][]string{},
 		PkgDocs: map[string]string{},
 	}
 	modPath, modName := readGoMod(abs)
 	m.Path, m.Name = modPath, modName
+	mods := findModules(abs)
 
 	var paths []string
 	err = filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
@@ -110,11 +127,7 @@ func loadModule(root string) (*Module, error) {
 			continue
 		}
 		rel, _ := filepath.Rel(abs, p)
-		dir := filepath.Dir(rel)
-		pkgPath := modPath
-		if dir != "." {
-			pkgPath = modPath + "/" + filepath.ToSlash(dir)
-		}
+		pkgPath := pkgPathFor(p, modPath, mods)
 		fc := &FileCtx{
 			Path:    p,
 			Rel:     filepath.ToSlash(rel),
@@ -142,6 +155,44 @@ func loadModule(root string) (*Module, error) {
 
 	for _, fc := range m.Files {
 		for _, d := range fc.Ast.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.TYPE {
+				for _, spec := range gd.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					if it, ok := ts.Type.(*ast.InterfaceType); ok {
+						var names []string
+						for _, mth := range it.Methods.List {
+							for _, n := range mth.Names {
+								if n.IsExported() {
+									names = append(names, n.Name)
+								}
+							}
+						}
+						if len(names) > 0 {
+							m.Ifaces[fc.PkgPath+"|"+ts.Name.Name] = names
+						}
+						continue
+					}
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					fields := map[string]FieldRef{}
+					for _, fld := range st.Fields.List {
+						typ := typeString(fld.Type)
+						pkg, name := typeRef(fc, typ)
+						for _, n := range fld.Names {
+							fields[n.Name] = FieldRef{Pkg: pkg, Name: name, Text: typ}
+						}
+					}
+					if len(fields) > 0 {
+						m.Fields[fc.PkgPath+"|"+ts.Name.Name] = fields
+					}
+				}
+				continue
+			}
 			fd, ok := d.(*ast.FuncDecl)
 			if !ok || fd.Body == nil {
 				continue
@@ -208,12 +259,28 @@ func (m *Module) callsOf(f *Func) []Call {
 			}
 		}
 		// methods called on the current receiver: h.requireParentPhone(...)
-		if c.Target == nil && f.RecvVar != "" && c.Base == f.RecvVar && f.Recv != "" {
+		if c.Target == nil && f.RecvVar != "" && c.Qual == f.RecvVar && f.Recv != "" {
 			for _, fn := range m.Methods[c.Sel] {
 				if fn.Recv == f.Recv {
 					c.Target = fn
 					c.PkgPath = fn.PkgPath
 					break
+				}
+			}
+		}
+		// methods on a field of the receiver: s.userStatusService.GetUser(...).
+		// The field's declared type decides the target, so a same-named method on
+		// the receiver itself is not picked by mistake.
+		if c.Target == nil && fieldCall(c.Qual, f.RecvVar) {
+			field := c.Qual[len(f.RecvVar)+1:]
+			if ref, ok := m.Fields[f.PkgPath+"|"+f.Recv][field]; ok {
+				c.Iface = ref.Text
+				if fn := m.methodOn(ref.Pkg, ref.Name, c.Sel); fn != nil {
+					c.Target = fn
+					c.PkgPath = fn.PkgPath
+				} else if fn := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); fn != nil {
+					c.Target = fn
+					c.PkgPath = fn.PkgPath
 				}
 			}
 		}
@@ -233,15 +300,125 @@ func (m *Module) callsOf(f *Func) []Call {
 	return out
 }
 
+// fieldCall reports whether the call hangs off a field of the receiver,
+// as in s.userService.GetUser: exactly one selector past the receiver.
+func fieldCall(qual, recvVar string) bool {
+	if recvVar == "" || !strings.HasPrefix(qual, recvVar+".") {
+		return false
+	}
+	rest := qual[len(recvVar)+1:]
+	return rest != "" && !strings.Contains(rest, ".")
+}
+
+// methodOn finds sel on the declared field type. It returns nil for interface
+// types: their methods live on implementations, not on the type itself.
+func (m *Module) methodOn(pkgPath, name, sel string) *Func {
+	for _, fn := range m.Methods[sel] {
+		if fn.PkgPath == pkgPath && fn.Recv == name {
+			return fn
+		}
+	}
+	return nil
+}
+
+// typeRef resolves a type as written in a file to its package path and name,
+// following the file's import aliases.
+func typeRef(file *FileCtx, typeText string) (string, string) {
+	t := strings.TrimPrefix(typeText, "*")
+	if i := strings.Index(t, "["); i >= 0 {
+		t = t[:i]
+	}
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		alias, short := t[:i], t[i+1:]
+		if p, ok := file.Imports[alias]; ok {
+			return p, short
+		}
+	}
+	return file.PkgPath, t
+}
+
+// ifaceImpl finds the method sel on the one concrete type that declares every
+// method of the interface: the receiver an interface call reaches when there is
+// exactly one, as with a repository interface and its store. Generated stubs
+// are skipped, and an ambiguous interface resolves to nothing.
+func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
+	ms, ok := m.Ifaces[pkgPath+"|"+name]
+	if !ok {
+		return nil
+	}
+	var match *Func
+	for _, fn := range m.Methods[sel] {
+		if fn.Recv == "" || !m.declaresAll(fn.PkgPath, fn.Recv, ms) {
+			continue
+		}
+		// the caller's own method is not an implementation of its field's interface
+		if self != nil && fn.PkgPath == self.PkgPath && fn.Recv == self.Recv {
+			continue
+		}
+		if generatedOnly(m.recvMethods(fn.PkgPath, fn.Recv)) {
+			continue
+		}
+		if match != nil {
+			return nil // more than one implementation: do not guess
+		}
+		match = fn
+	}
+	return match
+}
+
+// declaresAll reports whether the type has a method for every name.
+func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
+	for _, n := range names {
+		found := false
+		for _, fn := range m.Methods[n] {
+			if fn.PkgPath == pkgPath && fn.Recv == recv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// recvMethods collects every method declared on a type.
+func (m *Module) recvMethods(pkgPath, recv string) []*Func {
+	var out []*Func
+	for _, fns := range m.Methods {
+		for _, fn := range fns {
+			if fn.PkgPath == pkgPath && fn.Recv == recv {
+				out = append(out, fn)
+			}
+		}
+	}
+	return out
+}
+
 func describeCall(ce *ast.CallExpr) (Call, bool) {
-	switch fun := ce.Fun.(type) {
+	switch fun := unindex(ce.Fun).(type) {
 	case *ast.Ident:
 		return Call{Sel: fun.Name, Expr: fun.Name}, true
 	case *ast.SelectorExpr:
 		base, ex := chain(fun.X)
-		return Call{Base: base, Sel: fun.Sel.Name, Expr: ex + "." + fun.Sel.Name}, true
+		return Call{Base: base, Qual: ex, Sel: fun.Sel.Name, Expr: ex + "." + fun.Sel.Name}, true
 	}
 	return Call{}, false
+}
+
+// unindex strips generic type arguments, so pkg.Get[T](x) reads like pkg.Get(x).
+func unindex(e ast.Expr) ast.Expr {
+	for {
+		switch x := e.(type) {
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.IndexListExpr:
+			e = x.X
+		default:
+			return e
+		}
+	}
 }
 
 // chain returns the first identifier and the dotted expression text.
@@ -361,6 +538,53 @@ func fnKey(pkg, recv, name string) string {
 		return pkg + "|" + recv + "|" + name
 	}
 	return pkg + "|" + name
+}
+
+// modRoot is one go.mod inside the tree. A repo may hold several modules, each
+// with its own import path; files belong to the deepest module above them.
+type modRoot struct {
+	dir  string
+	path string
+}
+
+func findModules(abs string) []modRoot {
+	var out []modRoot
+	filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != abs && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" {
+			return nil
+		}
+		dir := filepath.Dir(p)
+		path, _ := readGoMod(dir)
+		out = append(out, modRoot{dir: dir, path: path})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return len(out[i].dir) > len(out[j].dir) })
+	return out
+}
+
+// pkgPathFor assigns a file the import path of its owning module, so imports
+// such as shared/pkg/proto/jobpb resolve inside a multi-module workspace.
+func pkgPathFor(p, fallback string, mods []modRoot) string {
+	for _, mr := range mods {
+		if p != mr.dir && !strings.HasPrefix(p, mr.dir+string(filepath.Separator)) {
+			continue
+		}
+		rel, err := filepath.Rel(mr.dir, filepath.Dir(p))
+		if err != nil || rel == "." {
+			return mr.path
+		}
+		return mr.path + "/" + filepath.ToSlash(rel)
+	}
+	return fallback
 }
 
 func readGoMod(root string) (string, string) {

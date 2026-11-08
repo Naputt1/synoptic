@@ -90,17 +90,28 @@ export function SearchDialog({
   data,
   open,
   onOpenChange,
+  svc = '',
 }: {
   data: Data
   open: boolean
   onOpenChange: (v: boolean) => void
+  /** limit hits to one service of a multi-entry module */
+  svc?: string
 }) {
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const tokens = useMemo(() => q.trim().toLowerCase().split(/\s+/).filter(Boolean), [q])
-  const all = useMemo(() => (q.trim() ? search(data.routes, q) : []), [q, data.routes])
+  const hits = useMemo(() => (q.trim() ? search(data.routes, q) : []), [q, data.routes])
+  const all = useMemo(
+    () => (svc ? hits.filter((h) => data.routes[h.i]?.svc === svc) : hits),
+    [hits, svc, data.routes],
+  )
+  const pool = useMemo(
+    () => (svc ? data.routes.filter((r) => r.svc === svc).length : data.routes.length),
+    [svc, data.routes],
+  )
   const results = all.slice(0, 14)
   const activeIndex = results.length ? Math.min(active, results.length - 1) : -1
 
@@ -182,7 +193,7 @@ export function SearchDialog({
               )}
               {!q.trim() && (
                 <div className="text-faint px-2 py-2 text-[11px]">
-                  type to search {data.routes.length} routes
+                  type to search {pool} routes{svc ? ` in ${svc}` : ''}
                 </div>
               )}
               {q.trim() && results.length > 0 && (
