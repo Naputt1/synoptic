@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
@@ -58,19 +59,21 @@ export function NodeMenu({ d }: { d: SData }) {
 
   return (
     <ContextMenuContent className="w-[224px]">
-      <ContextMenuLabel className="truncate">
-        {KIND[d.kind] ?? d.kind} <span className="text-faint">·</span>{' '}
-        <span className="text-mut tracking-normal normal-case">{heading}</span>
-      </ContextMenuLabel>
+      <ContextMenuGroup>
+        <ContextMenuLabel className="truncate">
+          {KIND[d.kind] ?? d.kind} <span className="text-faint">·</span>{' '}
+          <span className="text-mut tracking-normal normal-case">{heading}</span>
+        </ContextMenuLabel>
+      </ContextMenuGroup>
       <ContextMenuSeparator />
       {href && (
-        <ContextMenuItem onSelect={() => goto(href)}>
+        <ContextMenuItem onClick={() => goto(href)}>
           <ExternalLink /> {openLabel(d)}
         </ContextMenuItem>
       )}
       {source && (
         <ContextMenuItem
-          onSelect={() =>
+          onClick={() =>
             showSource(line!, d.lines as number[] | undefined, d.startLine as number | undefined)
           }
         >
@@ -84,25 +87,25 @@ export function NodeMenu({ d }: { d: SData }) {
         </ContextMenuSubTrigger>
         <ContextMenuSubContent className="w-[196px]">
           {href && (
-            <ContextMenuItem onSelect={() => void copyValue(absoluteLink(href), 'link')}>
+            <ContextMenuItem onClick={() => void copyValue(absoluteLink(href), 'link')}>
               <Link2 /> Link
             </ContextMenuItem>
           )}
-          <ContextMenuItem onSelect={() => void copyValue(d.title, 'name')}>
+          <ContextMenuItem onClick={() => void copyValue(d.title, 'name')}>
             <Type /> Name
           </ContextMenuItem>
           {path && (
-            <ContextMenuItem onSelect={() => void copyValue(path, 'path')}>
+            <ContextMenuItem onClick={() => void copyValue(path, 'path')}>
               <Route /> Path
             </ContextMenuItem>
           )}
           {ref && (
-            <ContextMenuItem onSelect={() => void copyValue(ref, 'source ref')}>
+            <ContextMenuItem onClick={() => void copyValue(ref, 'source ref')}>
               <FileCode2 /> Source ref
             </ContextMenuItem>
           )}
           {curl && (
-            <ContextMenuItem onSelect={() => void copyValue(curl, 'cURL')}>
+            <ContextMenuItem onClick={() => void copyValue(curl, 'cURL')}>
               <Terminal /> cURL
             </ContextMenuItem>
           )}
@@ -116,7 +119,7 @@ export function NodeMenu({ d }: { d: SData }) {
 export function CardMenu({ data, children }: { data: SData; children: ReactElement }) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuTrigger render={children} />
       <NodeMenu d={data} />
     </ContextMenu>
   )

@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
+  ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
   ContextMenuSeparator,
@@ -179,60 +180,64 @@ function Inner({ scene }: { scene: Scene }) {
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div ref={wrap} className="absolute inset-0" data-hot={hot ?? undefined}>
-          {hot && (
-            <style>{`
+      <ContextMenuTrigger
+        render={
+          <div ref={wrap} className="absolute inset-0" data-hot={hot ?? undefined}>
+            {hot && (
+              <style>{`
               [data-hot="${hot}"] .react-flow__edge:not(.edge-input-${hot}) { opacity: 0.18; }
               [data-hot="${hot}"] .edge-input-${hot} { opacity: 1 !important; }
               [data-hot="${hot}"] .edge-input-${hot} path { stroke: #58e0b7 !important; stroke-width: 2.2 !important; opacity: 1 !important; }
             `}</style>
-          )}
-          <ReactFlow
-            nodes={nodes}
-            edges={scene.edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange}
-            onNodeClick={onNodeClick}
-            onPaneClick={onPaneClick}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            elementsSelectable={false}
-            panOnScroll
-            zoomOnDoubleClick={false}
-            minZoom={0.2}
-            maxZoom={1.6}
-            proOptions={{ hideAttribution: true }}
-            className="grid-bg"
-          >
-            <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#24444b" />
-            <Controls showInteractive={false} position="bottom-right" />
-          </ReactFlow>
-        </div>
-      </ContextMenuTrigger>
+            )}
+            <ReactFlow
+              nodes={nodes}
+              edges={scene.edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onNodesChange={onNodesChange}
+              onNodeClick={onNodeClick}
+              onPaneClick={onPaneClick}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable={false}
+              panOnScroll
+              zoomOnDoubleClick={false}
+              minZoom={0.2}
+              maxZoom={1.6}
+              proOptions={{ hideAttribution: true }}
+              className="grid-bg"
+            >
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#24444b" />
+              <Controls showInteractive={false} position="bottom-right" />
+            </ReactFlow>
+          </div>
+        }
+      />
       <ContextMenuContent className="w-[214px]">
-        <ContextMenuLabel>canvas</ContextMenuLabel>
+        <ContextMenuGroup>
+          <ContextMenuLabel>canvas</ContextMenuLabel>
+        </ContextMenuGroup>
         <ContextMenuSeparator />
         <ContextMenuItem
-          onSelect={() => fitView({ padding: 0.14, duration: 320, minZoom: 0.22, maxZoom: 1.15 })}
+          onClick={() => fitView({ padding: 0.14, duration: 320, minZoom: 0.22, maxZoom: 1.15 })}
         >
           <LocateFixed /> Fit to view
         </ContextMenuItem>
-        <ContextMenuItem onSelect={openSearch}>
+        <ContextMenuItem onClick={openSearch}>
           <Search /> Search routes
           <ContextMenuShortcut>⌘K</ContextMenuShortcut>
         </ContextMenuItem>
         {hot && (
-          <ContextMenuItem onSelect={() => setHot(null)}>
+          <ContextMenuItem onClick={() => setHot(null)}>
             <MousePointerClick /> Clear highlight
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => void copyValue(window.location.href, 'page link')}>
+        <ContextMenuItem onClick={() => void copyValue(window.location.href, 'page link')}>
           <Link2 /> Copy page link
         </ContextMenuItem>
-        <ContextMenuItem onSelect={() => window.history.back()}>
+        <ContextMenuItem onClick={() => window.history.back()}>
           <ArrowLeft /> Back
         </ContextMenuItem>
       </ContextMenuContent>

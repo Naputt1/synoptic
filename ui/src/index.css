@@ -153,12 +153,12 @@ body {
     opacity: 0;
   }
 }
-.ctx-menu[data-state='open'],
-.ctx-menu-sub[data-state='open'] {
+.ctx-menu[data-open],
+.ctx-menu-sub[data-open] {
   animation: ctxIn 0.12s cubic-bezier(0.22, 0.7, 0.3, 1);
 }
-.ctx-menu[data-state='closed'],
-.ctx-menu-sub[data-state='closed'] {
+.ctx-menu[data-closed],
+.ctx-menu-sub[data-closed] {
   animation: ctxOut 0.09s ease-in forwards;
 }
 

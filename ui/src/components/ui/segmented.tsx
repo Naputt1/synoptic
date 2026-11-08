@@ -1,4 +1,5 @@
-import * as ToggleGroup from '@radix-ui/react-toggle-group'
+import { Toggle } from '@base-ui/react/toggle'
+import { ToggleGroup } from '@base-ui/react/toggle-group'
 
 import { cn } from '@/lib/utils'
 
@@ -16,24 +17,23 @@ export function Segmented({
   className?: string
 }) {
   return (
-    <ToggleGroup.Root
-      type="single"
-      value={value}
+    <ToggleGroup
+      value={[value]}
       onValueChange={(v) => {
-        if (v) onChange(v)
+        if (v[0]) onChange(v[0])
       }}
       className={cn('border-line flex overflow-hidden rounded-[5px] border', className)}
     >
       {options.map((o) => (
-        <ToggleGroup.Item
+        <Toggle
           key={o.value}
           value={o.value}
           title={o.title}
-          className="text-mut hover:text-ink data-[state=on]:bg-acc/15 data-[state=on]:text-acc focus-visible:text-ink px-2 py-[3px] text-[11px] transition-colors outline-none data-[state=on]:shadow-[inset_0_0_0_1px_rgba(88,224,183,0.28)]"
+          className="text-mut hover:text-ink data-[pressed]:bg-acc/15 data-[pressed]:text-acc focus-visible:text-ink px-2 py-[3px] text-[11px] transition-colors outline-none data-[pressed]:shadow-[inset_0_0_0_1px_rgba(88,224,183,0.28)]"
         >
           {o.label}
-        </ToggleGroup.Item>
+        </Toggle>
       ))}
-    </ToggleGroup.Root>
+    </ToggleGroup>
   )
 }
