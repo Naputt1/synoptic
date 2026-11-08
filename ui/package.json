@@ -1,12 +1,15 @@
 {
   "name": "synoptic-ui",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
+    "lint": "bun lint",
+    "typecheck": "bun check --no-script --no-pretty",
+    "format": "bun fmt",
+    "check": "bun run typecheck && bun lint && bun fmt --check",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,24 +19,27 @@
     "@tanstack/react-router": "^1.120.0",
     "@xyflow/react": "^12.12.0",
     "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "cn": "^0.5.2",
     "lucide-react": "^0.475.0",
     "motion": "^12.4.0",
     "radix-ui": "^1.8.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.0.2"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@shadcn/lint": "^0.2.5",
     "@tailwindcss/vite": "^4.0.9",
+    "@types/bun": "^1.4.4",
     "@types/node": "^26.6.6",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "tailwindcss": "^4.0.9",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",
     "vite-plugin-singlefile": "^2.2.0"
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

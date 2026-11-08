@@ -1,0 +1,30 @@
+# Bun 1.4 native formatter and linter. No Prettier or ESLint packages.
+# Inspect the resolved config with `bun lint --print-config src/App.tsx`.
+
+[fmt]
+printWidth = 100
+semi = false
+singleQuote = true
+sortImports = true
+sortTailwindcss = true
+sortPackageJson = true
+
+[lint]
+plugins = ["@shadcn/lint", "eslint-plugin-react-refresh"]
+ignorePatterns = ["dist/", "public/synoptic.json"]
+
+[lint.rules]
+"react-refresh/only-export-components" = ["warn", { allowConstantExport = true }]
+
+# synoptic uses a custom dense palette and React Flow inline layout values.
+# Keep the class checks, but do not force shadcn design tokens onto this UI.
+"shadcn/no-restyle" = "off"
+"shadcn/no-raw-colors" = "off"
+"shadcn/no-arbitrary-values" = "off"
+"shadcn/no-inline-styles" = "off"
+"shadcn/no-unknown-classes" = "error"
+"shadcn/require-static-classes" = "warn"
+
+[[lint.overrides]]
+files = ["src/components/ui/**"]
+rules = { "shadcn/no-unknown-classes" = "off", "shadcn/require-static-classes" = "off" }

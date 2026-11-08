@@ -3,11 +3,13 @@
 Reads a Go repo and renders its HTTP surface as one self-contained page: a **map of the router**, the **middleware pipeline of each route**, and the **code path of each handler** — all built from the source, no annotations required. WebSocket and server-sent-events routes are marked, and gRPC services get their own **RPC** tab.
 
 ```bash
-cd ui && npm install && npm run build && cd ..
+cd ui && bun install && bun run build && cd ..
 
 go run . -root /path/to/repo -out /path/to/repo/synoptic.html
 open /path/to/repo/synoptic.html
 ```
+
+The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; `bun fmt` writes formatting.
 
 Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI).
 
