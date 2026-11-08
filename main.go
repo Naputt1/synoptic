@@ -25,11 +25,13 @@ func main() {
 		os.Exit(1)
 	}
 	routes := buildRoutes(m)
-	if len(routes) == 0 {
-		fmt.Fprintln(os.Stderr, "no routes found: the router setup may use a constructor this build does not read yet")
+	services := buildServices(m)
+	if len(routes) == 0 && len(services) == 0 {
+		fmt.Fprintln(os.Stderr, "no routes or RPC services found: the setup may use a constructor this build does not read yet")
 		os.Exit(2)
 	}
 	d := buildData(m, routes)
+	attachServices(m, &d, services)
 	if *trace != "" {
 		tm, err := buildTiming(*trace, routes)
 		if err != nil {

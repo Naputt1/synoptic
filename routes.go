@@ -30,6 +30,13 @@ type Route struct {
 	Line   int
 	Chain  []Ref
 	Group  string
+	Proto  string
+	Stream *JStream
+	// Entry is the concrete stream handler behind a registration wrapper.
+	// websocket.Register(router, path, frontsocket.NewHandler(...)) does not
+	// put the handler in the route chain, but its OnMessage method is where
+	// the frames live.
+	Entry *Func
 }
 
 type Walker struct {
@@ -44,6 +51,8 @@ type Walker struct {
 	fnvars       map[string]*Func
 	types        map[string]map[string]string
 	zeros        map[string]map[string]string
+	pathArgs     map[string]map[string]string
+	entry        *Func
 	changed      bool
 }
 
@@ -61,7 +70,7 @@ var routeVerbs = map[string]string{
 }
 
 func buildRoutes(m *Module) []*Route {
-	w := &Walker{m: m, states: map[string]map[string]State{}, seen: map[string]bool{}, routerFields: map[string]map[string]bool{}, fnvars: map[string]*Func{}, types: map[string]map[string]string{}, zeros: map[string]map[string]string{}}
+	w := &Walker{m: m, states: map[string]map[string]State{}, seen: map[string]bool{}, routerFields: map[string]map[string]bool{}, fnvars: map[string]*Func{}, types: map[string]map[string]string{}, zeros: map[string]map[string]string{}, pathArgs: map[string]map[string]string{}}
 	w.seed()
 	// entrypoints often have no router typed parameter themselves; they create
 	// or receive one and hand it to a Register helper. Walk them once so that
@@ -513,7 +522,120 @@ func (w *Walker) call(f *Func, ce *ast.CallExpr, env map[string]State) {
 				w.setState(target, pn, s)
 			}
 		}
+		w.inlineBound(target, ce, f, env)
 	}
+}
+
+// inlineBound runs a registration helper once for this call site so path
+// arguments survive. A helper called twice with different literals
+// (Register(router, "/ws", ...) and Register(router, "/ws-syspipe", ...))
+// cannot be represented by one per-function state.
+func (w *Walker) inlineBound(target *Func, ce *ast.CallExpr, caller *Func, callerEnv map[string]State) {
+	if !w.bindable(target) {
+		return
+	}
+	env := map[string]State{}
+	for i, arg := range ce.Args {
+		pn := paramName(target, i)
+		if pn == "" {
+			continue
+		}
+		if st, ok := w.stateOf(caller, arg, callerEnv); ok {
+			env[pn] = st
+		}
+	}
+	bind := map[string]string{}
+	for k, v := range w.pathArgs[target.Key] {
+		bind[k] = v
+	}
+	for i, arg := range ce.Args {
+		pn := paramName(target, i)
+		if pn == "" {
+			continue
+		}
+		if pv := w.pathOf(caller, arg); pv != "" && pv != ":dynamic" && !strings.HasPrefix(pv, ":") {
+			bind[pn] = pv
+		}
+	}
+	var entry *Func
+	for _, arg := range ce.Args {
+		if fn := w.streamEntry(caller, arg); fn != nil {
+			entry = fn
+			break
+		}
+	}
+	oldEntry := w.entry
+	if entry != nil {
+		w.entry = entry
+	}
+	old := w.pathArgs[target.Key]
+	w.pathArgs[target.Key] = bind
+	w.body(target, target.Decl.Body.List, env)
+	if old == nil {
+		delete(w.pathArgs, target.Key)
+	} else {
+		w.pathArgs[target.Key] = old
+	}
+	w.entry = oldEntry
+}
+
+// streamEntry follows a handler factory such as frontsocket.NewHandler to the
+// concrete OnMessage method. Generated/factory returns are often interfaces,
+// so package ownership of the factory is the reliable discriminator.
+func (w *Walker) streamEntry(f *Func, e ast.Expr) *Func {
+	if lit, ok := e.(*ast.CompositeLit); ok {
+		typ := strings.TrimPrefix(typeString(lit.Type), "*")
+		for _, m := range w.m.ByRecv[typ] {
+			if m.Name == "OnMessage" {
+				return m
+			}
+		}
+	}
+	target := w.resolveAny(f, e)
+	if target == nil {
+		return nil
+	}
+	for _, m := range w.m.Methods["OnMessage"] {
+		if m.PkgPath == target.PkgPath && m.Recv != "" {
+			return m
+		}
+	}
+	return nil
+}
+
+func (w *Walker) bindable(f *Func) bool {
+	if f == nil || f.Decl == nil || f.Decl.Body == nil || f.Decl.Type.Params == nil {
+		return false
+	}
+	params := map[string]bool{}
+	for _, p := range f.Decl.Type.Params.List {
+		for _, n := range p.Names {
+			params[n.Name] = true
+		}
+	}
+	if len(params) == 0 {
+		return false
+	}
+	found := false
+	ast.Inspect(f.Decl.Body, func(n ast.Node) bool {
+		ce, ok := n.(*ast.CallExpr)
+		if !ok || len(ce.Args) == 0 {
+			return true
+		}
+		sel, ok := ce.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if _, route := routeVerbs[sel.Sel.Name]; !route {
+			return true
+		}
+		if id, ok := ce.Args[0].(*ast.Ident); ok && params[id.Name] {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // addCallRoute records one verb call on a router state. The path can be a
@@ -646,6 +768,7 @@ func (w *Walker) addRoute(f *Func, method, path string, at ast.Node, chain []Ref
 		Line:   ln,
 		Chain:  chain,
 		Group:  group,
+		Entry:  w.entry,
 	})
 }
 
@@ -955,6 +1078,11 @@ func (w *Walker) zeroOf(f *Func, name string) string {
 // struct: PBRegisterOption{} leaves BaseURL empty, so options.BaseURL+"..." is
 // just "...". Unknown prefixes stay dynamic and are skipped.
 func (w *Walker) pathOf(f *Func, e ast.Expr) string {
+	if id := identName(e); id != "" {
+		if v, ok := w.pathArgs[f.Key][id]; ok {
+			return v
+		}
+	}
 	switch x := e.(type) {
 	case *ast.ParenExpr:
 		return w.pathOf(f, x.X)

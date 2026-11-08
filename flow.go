@@ -15,6 +15,7 @@ import (
 type Step struct {
 	Kind    string   `json:"k"` // call, exit, if, loop, switch, ret, note
 	Text    string   `json:"t"`
+	Rk      string   `json:"rk,omitempty"` // nil, error, void on return steps
 	Sub     string   `json:"s,omitempty"`
 	SubLine int      `json:"sl,omitempty"`
 	Code    string   `json:"cd,omitempty"`
@@ -161,6 +162,20 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 			st := Step{Kind: "loop", Text: "for " + exprTexts(rangeKey(x)) + " := range " + exprText(x.X), Line: line(x.Pos())}
 			st.Body = flowSteps(f, x.Body.List)
 			add(st)
+		case *ast.SelectStmt:
+			st := Step{Kind: "switch", Text: "select", File: f.File.Rel, Line: line(x.Pos())}
+			if x.Body != nil {
+				for _, cl := range x.Body.List {
+					if cc, ok := cl.(*ast.CommClause); ok {
+						label := "default"
+						if cc.Comm != nil {
+							label = commText(cc.Comm)
+						}
+						st.Body = append(st.Body, Step{Kind: "note", Text: label, Body: flowSteps(f, cc.Body)})
+					}
+				}
+			}
+			add(st)
 		case *ast.SwitchStmt:
 			st := Step{Kind: "switch", Text: "switch " + exprText(x.Tag), Line: line(x.Pos())}
 			if x.Body != nil {
@@ -188,7 +203,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 		case *ast.LabeledStmt:
 			add(Step{Kind: "note", Text: x.Label.Name + ":", Line: line(x.Pos())})
 		case *ast.ReturnStmt:
-			st := Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Line: line(x.Pos())}
+			st := Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Rk: returnKind(x.Results), Line: line(x.Pos())}
 			if len(x.Results) > 0 {
 				if ce := firstCall(x.Results[0]); ce != nil {
 					setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
@@ -207,10 +222,18 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 				}
 			}
 			add(st)
-		case *ast.DeferStmt, *ast.GoStmt, *ast.EmptyStmt, *ast.BranchStmt:
+		case *ast.BranchStmt:
+			if x.Tok == token.CONTINUE {
+				add(Step{Kind: "continue", Text: "continue", Line: line(x.Pos())})
+			}
+		case *ast.DeferStmt, *ast.GoStmt, *ast.EmptyStmt:
 			// defer, go, break: badges, not boxes
 		case *ast.ExprStmt:
-			add(callStep(f, x.X, calls))
+			if st, ok := streamStep(f, x.X, calls); ok {
+				add(st)
+			} else {
+				add(callStep(f, x.X, calls))
+			}
 		case *ast.AssignStmt:
 			// x, err := call(); if err != nil { … } — one card: the call that
 			// can fail on top, the guard below, and the card opens the call.
@@ -338,6 +361,15 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 	if (c.Base == "c" || c.Base == "ctx") && (c.Sel == "Set" || c.Sel == "SetCookie") {
 		return Step{Kind: "call", Text: exprText(ce), Sub: "context write", File: f.File.Rel, Line: line(ce.Pos())}
 	}
+	if isStreamWrite(c) {
+		return Step{Kind: "call", Text: exprText(ce), Sub: "stream write", File: f.File.Rel, Line: line(ce.Pos())}
+	}
+	if c.Sel == "Flush" || strings.HasSuffix(c.Expr, ".Flush()") {
+		return Step{Kind: "call", Text: exprText(ce), Sub: "stream flush", File: f.File.Rel, Line: line(ce.Pos())}
+	}
+	if c.Sel == "WriteHeader" {
+		return Step{Kind: "call", Text: exprText(ce), Sub: "response status", File: f.File.Rel, Line: line(ce.Pos())}
+	}
 	if !known && isNoise(c) {
 		return Step{}
 	}
@@ -360,6 +392,58 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 		return Step{}
 	}
 	return st
+}
+
+// streamStep keeps the callback body of c.Stream visible. Without this the
+// SSE event loop and its writes disappear behind one unclassified call.
+func streamStep(f *Func, e ast.Expr, calls map[string]Call) (Step, bool) {
+	ce := firstCall(e)
+	if ce == nil {
+		return Step{}, false
+	}
+	c, ok := describeCall(ce)
+	if !ok {
+		return Step{}, false
+	}
+	if c.Sel != "Stream" && c.Sel != "SendStream" {
+		return Step{}, false
+	}
+	st := Step{Kind: "loop", Text: exprText(ce), Sub: "stream loop", File: f.File.Rel, Line: line(ce.Pos())}
+	for _, a := range ce.Args {
+		switch x := a.(type) {
+		case *ast.FuncLit:
+			st.Body = flowSteps(f, x.Body.List)
+		case *ast.ParenExpr:
+			if lit, ok := x.X.(*ast.FuncLit); ok {
+				st.Body = flowSteps(f, lit.Body.List)
+			}
+		}
+		if st.Body != nil {
+			break
+		}
+	}
+	return st, true
+}
+
+func isStreamWrite(c Call) bool {
+	sel := strings.ToLower(c.Sel)
+	base := strings.ToLower(c.Base)
+	if sel != "writestring" && sel != "fprintf" && sel != "fprint" && sel != "write" {
+		return false
+	}
+	return base == "io" || base == "fmt" || strings.Contains(c.Expr, "Writer")
+}
+
+func commText(s ast.Stmt) string {
+	switch x := s.(type) {
+	case *ast.AssignStmt:
+		return exprTexts(x.Lhs) + " := " + exprTexts(x.Rhs)
+	case *ast.ExprStmt:
+		return exprText(x.X)
+	case *ast.SendStmt:
+		return exprText(x.Chan) + " <- " + exprText(x.Value)
+	}
+	return ""
 }
 
 func firstCall(e ast.Expr) *ast.CallExpr {
@@ -461,7 +545,10 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 		take(sw.callStatuses(ce, calls, f, nil))
 	}
 	// the call that can fail is more useful than the condition that tests it
-	st := Step{Kind: "exit", Text: exprText(x.Cond), Line: line(x.Pos())}
+	st := Step{Kind: "exit", Text: exprText(x.Cond), Rk: returnKind(ret.Results), Line: line(x.Pos())}
+	if st.Rk == "" && errorBranch(x) {
+		st.Rk = "error"
+	}
 	if init, isAssign := x.Init.(*ast.AssignStmt); isAssign && len(init.Rhs) == 1 {
 		if ce := firstCall(init.Rhs[0]); ce != nil {
 			take(sw.callStatuses(ce, calls, f, nil))
@@ -836,6 +923,142 @@ func refersTo(e ast.Expr, names []string) bool {
 		return !found
 	})
 	return found
+}
+
+// returnKind marks the outcome of a return without guessing about values the
+// source does not name. A bare return is void; nil and error returns are the
+// two outcomes a reader needs to tell apart.
+func returnKind(list []ast.Expr) string {
+	if len(list) == 0 {
+		return "void"
+	}
+	allNil := true
+	for _, e := range list {
+		if isNilExpr(e) {
+			continue
+		}
+		allNil = false
+		if isErrorExpr(e) {
+			return "error"
+		}
+	}
+	if allNil {
+		return "nil"
+	}
+	return ""
+}
+
+// errorBranch recognizes an if that is handling an error even when the branch
+// answers with a response instead of returning the error value itself. The
+// condition is the reliable signal; a failure constructor in the body catches
+// branches such as len(items) == 0 that build a New...Fail response.
+func errorBranch(x *ast.IfStmt) bool {
+	if errorCondition(x.Cond) {
+		return true
+	}
+	found := false
+	ast.Inspect(x.Body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		ce, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		found = errorConstructor(exprText(ce.Fun))
+		return !found
+	})
+	return found
+}
+
+func errorCondition(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return errorCondition(x.X)
+	case *ast.UnaryExpr:
+		return x.Op == token.NOT && errorCondition(x.X)
+	case *ast.CallExpr:
+		name := exprText(x.Fun)
+		return name == "errors.Is" || name == "errors.As"
+	case *ast.BinaryExpr:
+		if x.Op != token.NEQ && x.Op != token.EQL {
+			return false
+		}
+		if isNilExpr(x.Y) {
+			return errorOperand(x.X)
+		}
+		if isNilExpr(x.X) {
+			return errorOperand(x.Y)
+		}
+	}
+	return false
+}
+
+func errorOperand(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return errorOperand(x.X)
+	case *ast.Ident:
+		return isErrorName(x.Name)
+	case *ast.SelectorExpr:
+		return isErrorName(x.Sel.Name)
+	}
+	return false
+}
+
+func isErrorName(name string) bool {
+	return name == "err" || strings.HasPrefix(name, "Err") || strings.HasSuffix(name, "Err") || strings.HasSuffix(name, "Error")
+}
+
+func errorConstructor(name string) bool {
+	if name == "fmt.Errorf" || name == "errors.New" || name == "errors.Join" {
+		return true
+	}
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		name = name[i+1:]
+	}
+	if name == "Errorf" {
+		return true
+	}
+	if !strings.HasPrefix(name, "New") {
+		return false
+	}
+	rest := name[3:]
+	for _, word := range []string{"Fail", "Error", "Invalid", "Unauthorized", "Forbidden", "NotFound", "BadRequest"} {
+		if strings.Contains(rest, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNilExpr(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return x.Name == "nil"
+	case *ast.ParenExpr:
+		return isNilExpr(x.X)
+	}
+	return false
+}
+
+func isErrorExpr(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.ParenExpr:
+		return isErrorExpr(x.X)
+	case *ast.Ident:
+		return isErrorName(x.Name)
+	case *ast.CallExpr:
+		name := exprText(x.Fun)
+		return name == "errors.New" || name == "errors.Join" || name == "fmt.Errorf" || strings.HasSuffix(name, ".Errorf")
+	case *ast.CompositeLit:
+		name := exprText(x.Type)
+		return strings.HasSuffix(name, "Err") || strings.HasSuffix(name, "Error")
+	}
+	return false
 }
 
 func exprTexts(list []ast.Expr) string {

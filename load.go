@@ -290,6 +290,22 @@ func typeString(e ast.Expr) string {
 		return typeString(x.X) + "." + x.Sel.Name
 	case *ast.IndexExpr:
 		return typeString(x.X)
+	case *ast.ArrayType:
+		return "[]" + typeString(x.Elt)
+	case *ast.MapType:
+		return "map[" + typeString(x.Key) + "]" + typeString(x.Value)
+	case *ast.ChanType:
+		switch x.Dir {
+		case ast.SEND:
+			return "chan<- " + typeString(x.Value)
+		case ast.RECV:
+			return "<-chan " + typeString(x.Value)
+		}
+		return "chan " + typeString(x.Value)
+	case *ast.Ellipsis:
+		return "..." + typeString(x.Elt)
+	case *ast.InterfaceType:
+		return "interface{}"
 	}
 	return ""
 }
@@ -321,15 +337,23 @@ func recvName(fd *ast.FuncDecl) string {
 	if fd.Recv == nil || len(fd.Recv.List) == 0 {
 		return ""
 	}
-	switch t := fd.Recv.List[0].Type.(type) {
-	case *ast.StarExpr:
-		if id, ok := t.X.(*ast.Ident); ok {
-			return id.Name
+	var walk func(ast.Expr) string
+	walk = func(e ast.Expr) string {
+		switch t := e.(type) {
+		case *ast.StarExpr:
+			return walk(t.X)
+		case *ast.ParenExpr:
+			return walk(t.X)
+		case *ast.IndexExpr:
+			return walk(t.X)
+		case *ast.IndexListExpr:
+			return walk(t.X)
+		case *ast.Ident:
+			return t.Name
 		}
-	case *ast.Ident:
-		return t.Name
+		return ""
 	}
-	return ""
+	return walk(fd.Recv.List[0].Type)
 }
 
 func fnKey(pkg, recv, name string) string {

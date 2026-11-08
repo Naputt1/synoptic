@@ -125,6 +125,38 @@ func handleSwitch(c *Ctx) {
 	}
 	c.JSON(status, nil)
 }
+
+func handleReturns(err error) error {
+	if err != nil {
+		return err
+	}
+	if allowed() {
+		return nil
+	}
+	return
+}
+
+func handleValue() int { return 7 }
+
+func handleContinue(c *Ctx) {
+	for i := 0; i < 3; i++ {
+		if i == 1 {
+			continue
+		}
+		c.JSON(200, nil)
+	}
+}
+
+func (c *Ctx) WriteMsgpack(any) error { return nil }
+func failMsg(err error) string       { return err.Error() }
+
+func handleErrorResponse(c *Ctx, err error) {
+	if err != nil {
+		err := fmt.Errorf("bad organization: %w", err)
+		m := failMsg(err)
+		return c.WriteMsgpack(m)
+	}
+}
 `
 
 func loadStatusFixture(t *testing.T) *Module {
@@ -206,5 +238,53 @@ func TestStatusesFollowHelpers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReturnKinds(t *testing.T) {
+	m := loadStatusFixture(t)
+	cases := []struct {
+		name  string
+		steps []Step
+		want  []string
+	}{
+		{"handleReturns", buildFlow(m.PKG["example.com/fixture"]["handleReturns"]), []string{"error", "nil", "void"}},
+		{"handleErrorResponse", buildFlow(m.PKG["example.com/fixture"]["handleErrorResponse"]), []string{"error"}},
+		{"handleValue", buildFlow(m.PKG["example.com/fixture"]["handleValue"]), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			walkSteps(tc.steps, func(s Step) {
+				if s.Rk != "" {
+					got = append(got, s.Rk)
+				}
+			})
+			if len(got) != len(tc.want) {
+				t.Fatalf("return kinds = %v, want %v", got, tc.want)
+			}
+			seen := map[string]bool{}
+			for _, kind := range got {
+				seen[kind] = true
+			}
+			for _, want := range tc.want {
+				if !seen[want] {
+					t.Fatalf("return kinds = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestContinueStep(t *testing.T) {
+	m := loadStatusFixture(t)
+	found := false
+	walkSteps(buildFlow(m.PKG["example.com/fixture"]["handleContinue"]), func(s Step) {
+		if s.Kind == "continue" && s.Text == "continue" {
+			found = true
+		}
+	})
+	if !found {
+		t.Fatal("continue branch was not kept in the flow")
 	}
 }

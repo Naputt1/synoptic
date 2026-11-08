@@ -28,20 +28,23 @@ type JRoute struct {
 	P     string   `json:"p"`
 	F     string   `json:"f"`
 	L     int      `json:"l"`
+	Pr    string   `json:"pr,omitempty"`
+	St    *JStream `json:"st,omitempty"`
 	Chain []JStage `json:"ch"`
 	Doc   *JDoc    `json:"doc,omitempty"`
 }
 
 // JFunc is one node of the code graph: enough to draw its flow and its body.
 type JFunc struct {
-	Name  string   `json:"n"`
-	Pkg   string   `json:"p,omitempty"`
-	File  string   `json:"f,omitempty"`
-	Line  int      `json:"l,omitempty"`
-	Doc   string   `json:"d,omitempty"`
-	Src   string   `json:"s,omitempty"`
-	Steps []Step   `json:"flow,omitempty"`
-	In    []JInput `json:"in,omitempty"`
+	Name  string    `json:"n"`
+	Pkg   string    `json:"p,omitempty"`
+	File  string    `json:"f,omitempty"`
+	Line  int       `json:"l,omitempty"`
+	Doc   string    `json:"d,omitempty"`
+	Src   string    `json:"s,omitempty"`
+	Steps []Step    `json:"flow,omitempty"`
+	In    []JInput  `json:"in,omitempty"`
+	Fx    []JEffect `json:"fx,omitempty"`
 }
 
 type JStats struct {
@@ -51,16 +54,22 @@ type JStats struct {
 	Documented int `json:"documented"`
 	Packages   int `json:"packages"`
 	Funcs      int `json:"funcs"`
+	Streams    int `json:"streams,omitempty"`
+	WS         int `json:"ws,omitempty"`
+	SSE        int `json:"sse,omitempty"`
+	Services   int `json:"services,omitempty"`
+	RPCs       int `json:"rpcs,omitempty"`
 }
 
 type JData struct {
-	Repo   string                  `json:"repo"`
-	Mod    string                  `json:"mod"`
-	Stats  JStats                  `json:"stats"`
-	Routes []JRoute                `json:"routes"`
-	Flows  map[string]JFunc        `json:"flows"`
-	Types  map[string]JType        `json:"types,omitempty"`
-	Timing map[string]JRouteTiming `json:"timing,omitempty"`
+	Repo     string                  `json:"repo"`
+	Mod      string                  `json:"mod"`
+	Stats    JStats                  `json:"stats"`
+	Routes   []JRoute                `json:"routes"`
+	Services []JService              `json:"services,omitempty"`
+	Flows    map[string]JFunc        `json:"flows"`
+	Types    map[string]JType        `json:"types,omitempty"`
+	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
 }
 
 func buildData(m *Module, routes []*Route) JData {
@@ -70,7 +79,20 @@ func buildData(m *Module, routes []*Route) JData {
 
 	for _, r := range routes {
 		groups[r.Group] = true
-		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line}
+		r.Stream = classifyStream(m, r)
+		if r.Stream != nil {
+			r.Proto = r.Stream.K
+		}
+		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line, Pr: r.Proto, St: r.Stream}
+		if r.Stream != nil {
+			d.Stats.Streams++
+			switch r.Stream.K {
+			case "ws":
+				d.Stats.WS++
+			case "sse":
+				d.Stats.SSE++
+			}
+		}
 		for _, ref := range r.Chain {
 			st := JStage{Name: ref.Name, Kind: ref.Kind, Role: ref.Role, Line: ref.Line}
 			if ref.File != nil {
@@ -106,6 +128,8 @@ func buildData(m *Module, routes []*Route) JData {
 		}
 		return d.Routes[i].M < d.Routes[j].M
 	})
+	indexStreamEvents(m, d.Flows, routes)
+	attachStreamOrigins(m, routes, d.Routes)
 
 	d.Stats.Routes = len(d.Routes)
 	d.Stats.Groups = len(groups)
@@ -122,6 +146,40 @@ func buildData(m *Module, routes []*Route) JData {
 
 const flowLimit = 1400
 const flowDepth = 3
+
+// indexStreamEvents bakes the concrete switch-case handlers too, so the event
+// inspector can show how each event is processed without making a second pass.
+func indexStreamEvents(m *Module, flows map[string]JFunc, routes []*Route) {
+	for _, r := range routes {
+		if r.Stream == nil {
+			continue
+		}
+		if r.Stream.K == "sse" && r.Stream.Hk == "" {
+			// The registered handler is often a one-line closure around the
+			// real stream loop. Point the inspector at that function.
+			for i := len(r.Chain) - 1; i >= 0; i-- {
+				ref := r.Chain[i]
+				if ref.Fn == nil || (ref.Kind != "closure" && !strings.Contains(strings.ToLower(ref.Name), "inline")) {
+					continue
+				}
+				for _, c := range ref.Fn.Calls {
+					if c.Target != nil {
+						r.Stream.Hk = c.Target.Key
+						break
+					}
+				}
+				if r.Stream.Hk != "" {
+					break
+				}
+			}
+		}
+		for _, e := range r.Stream.Evs {
+			if e.fn != nil {
+				indexFunc(m, flows, e.fn, 0)
+			}
+		}
+	}
+}
 
 // indexFunc bakes a function's flow and its callees, so every click is local.
 func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
@@ -144,6 +202,7 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 		Src:   snippet(fn, 120),
 		Steps: buildFlow(fn),
 		In:    analyzeStageInputs(m, fn, ""),
+		Fx:    buildEffects(fn),
 	}
 	if depth >= flowDepth {
 		return
@@ -325,6 +384,12 @@ func report(d JData, out string) {
 	fmt.Printf("  routes     %d\n", d.Stats.Routes)
 	fmt.Printf("  groups     %d\n", d.Stats.Groups)
 	fmt.Printf("  middleware %d\n", d.Stats.Middleware)
+	if d.Stats.Streams > 0 {
+		fmt.Printf("  streams    %d (%d ws, %d sse)\n", d.Stats.Streams, d.Stats.WS, d.Stats.SSE)
+	}
+	if d.Stats.Services > 0 {
+		fmt.Printf("  rpc        %d services, %d methods\n", d.Stats.Services, d.Stats.RPCs)
+	}
 	fmt.Printf("  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
 	fmt.Printf("  flows baked                  %d functions\n", d.Stats.Funcs)
 	fmt.Printf("  written to %s\n", out)

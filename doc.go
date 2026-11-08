@@ -135,6 +135,17 @@ func buildDoc(m *Module, r *Route) *JDoc {
 			break
 		}
 	}
+	if !d.Auth {
+		for _, in := range d.Inputs {
+			n := strings.ToLower(in.Name)
+			if (in.Kind == "query" || in.Kind == "cookie" || in.Kind == "header") &&
+				(strings.Contains(n, "token") || strings.Contains(n, "auth")) {
+				d.Auth = true
+				d.AuthWhy = in.Kind + " " + in.Name
+				break
+			}
+		}
+	}
 
 	d.Tables = tablesOf(m, h)
 	if meta := gitMeta(m.Root, h.File.Rel); meta != nil {
@@ -355,6 +366,54 @@ func gitMeta(root, rel string) []string {
 // curlFor writes an example request. Values are placeholders shaped by the
 // proven fields, nothing more.
 func curlFor(r *Route, d *JDoc) string {
+	path := requestPath(r, d)
+	if r.Proto == "ws" {
+		scheme := "ws"
+		if strings.Contains(strings.ToLower(r.Path), "wss") {
+			scheme = "wss"
+		}
+		var b strings.Builder
+		b.WriteString("wscat -c '" + scheme + "://localhost:8080" + path + "'")
+		if bearerExample(d) {
+			b.WriteString(" \\\n  -H \"Authorization: Bearer $TOKEN\"")
+		}
+		return b.String()
+	}
+	if r.Proto == "sse" {
+		var b strings.Builder
+		b.WriteString("curl -N http://localhost:8080" + path)
+		b.WriteString(" \\\n  -H \"Accept: text/event-stream\"")
+		if bearerExample(d) {
+			b.WriteString(" \\\n  -H \"Authorization: Bearer $TOKEN\"")
+		}
+		return b.String()
+	}
+	var b strings.Builder
+	b.WriteString("curl -X " + r.Method + " http://localhost:8080" + path)
+	if bearerExample(d) {
+		b.WriteString(" \\\n  -H \"Authorization: Bearer $TOKEN\"")
+	}
+	if len(d.Body) > 0 {
+		b.WriteString(" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{")
+		for i, f := range d.Body {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("\"" + f.N + "\": " + placeholder(f.T))
+		}
+		b.WriteString("}'")
+	}
+	return b.String()
+}
+
+func bearerExample(d *JDoc) bool {
+	if d == nil || !d.Auth {
+		return false
+	}
+	return !strings.HasPrefix(d.AuthWhy, "query ") && !strings.HasPrefix(d.AuthWhy, "cookie ")
+}
+
+func requestPath(r *Route, d *JDoc) string {
 	path := r.Path
 	for _, p := range d.Path {
 		path = strings.ReplaceAll(path, ":"+p.N, "<"+p.N+">")
@@ -371,22 +430,7 @@ func curlFor(r *Route, d *JDoc) string {
 		}
 		path += sep + strings.Join(qs, "&")
 	}
-	var b strings.Builder
-	b.WriteString("curl -X " + r.Method + " http://localhost:8080" + path)
-	if d.Auth {
-		b.WriteString(" \\\n  -H \"Authorization: Bearer $TOKEN\"")
-	}
-	if len(d.Body) > 0 {
-		b.WriteString(" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{")
-		for i, f := range d.Body {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString("\"" + f.N + "\": " + placeholder(f.T))
-		}
-		b.WriteString("}'")
-	}
-	return b.String()
+	return path
 }
 
 func placeholder(t string) string {
