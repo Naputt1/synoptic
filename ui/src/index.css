@@ -18,6 +18,15 @@
   --radius: 6px;
 }
 
+/* React Flow reads these class names to opt elements out of pan and drag. */
+@utility nopan {
+  user-select: text;
+}
+
+@utility nodrag {
+  user-select: text;
+}
+
 html,
 body,
 #root {

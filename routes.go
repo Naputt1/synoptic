@@ -667,8 +667,9 @@ func (w *Walker) addCallRoute(f *Func, ce *ast.CallExpr, st State, method, name 
 			}
 		}
 	}
-	tail = append(tail, w.extra...)
-	chain := append(append([]Ref(nil), st.Mws...), tail...)
+	// Fluent middleware (.Bind/.Use) wraps the action, so it runs first.
+	chain := append(append([]Ref(nil), st.Mws...), w.extra...)
+	chain = append(chain, tail...)
 	if len(w.methods) > 0 && (method == "ANY" || name == "HandleFunc" || name == "Handle") {
 		for _, mm := range w.methods {
 			w.addRoute(f, mm, path, ce, chain)

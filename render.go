@@ -77,6 +77,9 @@ func buildData(m *Module, routes []*Route) JData {
 	groups := map[string]bool{}
 	mw := map[string]bool{}
 
+	types := buildTypeCatalog(m)
+	resolveDispatchedHandlers(m, routes, types)
+
 	for _, r := range routes {
 		groups[r.Group] = true
 		r.Stream = classifyStream(m, r)
@@ -135,7 +138,7 @@ func buildData(m *Module, routes []*Route) JData {
 	d.Stats.Groups = len(groups)
 	d.Stats.Middleware = len(mw)
 	d.Stats.Packages = len(m.PKG)
-	d.Types = buildTypeCatalog(m)
+	d.Types = types
 	for key, jf := range d.Flows {
 		annotateSteps(jf.Steps, d.Types)
 		d.Flows[key] = jf

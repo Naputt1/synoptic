@@ -14,8 +14,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { GoSource } from './components/GoSource'
 import { Badge } from './components/ui/badge'
-import { Button } from './components/ui/button'
+import { Button, buttonVariants } from './components/ui/button'
 import { SearchDialog } from './components/ui/command'
+import { AppLink } from './components/ui/link'
 import { Segmented } from './components/ui/segmented'
 import { Sheet } from './components/ui/sheet'
 import { buildFlowScene } from './graph/flowscene'
@@ -60,6 +61,13 @@ const useData = () => {
 /* ---------- crumbs ---------- */
 
 type Crumb = { label: string; href?: string }
+
+// Search params are strings, and an absent value must not become stage 0.
+const numParam = (v?: string): number | undefined => {
+  if (v === undefined || v === '') return undefined
+  const n = Number(v)
+  return Number.isInteger(n) ? n : undefined
+}
 
 function useCrumbs(): Crumb[] {
   const data = useData()
@@ -113,11 +121,12 @@ function useCrumbs(): Crumb[] {
     const key = search.k ?? ''
     const iface = search.i ? data.types?.[search.i] : undefined
     const self = data.types?.[key]
-    const ri = Number(search.ri ?? '')
-    const si = Number(search.si ?? '')
-    const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
-    if (Number.isFinite(ri) && data.routes[ri]) {
-      routeChain(ri, Number.isFinite(si) ? si : undefined)
+    const ri = numParam(search.ri)
+    const si = numParam(search.si)
+    const origin =
+      ri !== undefined && data.routes[ri] ? `&ri=${ri}${si !== undefined ? `&si=${si}` : ''}` : ''
+    if (ri !== undefined && data.routes[ri]) {
+      routeChain(ri, si)
     }
     if (iface)
       crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
@@ -144,11 +153,12 @@ function useCrumbs(): Crumb[] {
     const st = search.t ? data.types?.[search.t] : undefined
     // keep the route and stage that opened this function, so back navigation
     // has the whole chain instead of restarting at the repo
-    const ri = Number(search.ri ?? '')
-    const si = Number(search.si ?? '')
-    const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
-    if (Number.isFinite(ri) && data.routes[ri]) {
-      routeChain(ri, Number.isFinite(si) ? si : undefined, f?.n)
+    const ri = numParam(search.ri)
+    const si = numParam(search.si)
+    const origin =
+      ri !== undefined && data.routes[ri] ? `&ri=${ri}${si !== undefined ? `&si=${si}` : ''}` : ''
+    if (ri !== undefined && data.routes[ri]) {
+      routeChain(ri, si, f?.n)
     }
     if (iface)
       crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
@@ -173,7 +183,7 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
     parts[0] === 'rpc'
       ? ''
       : parts[0] === 'f'
-        ? 'code'
+        ? ''
         : parts[0] === 'r'
           ? parts[2] === 's'
             ? 'step'
@@ -234,18 +244,19 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
               { value: 'router', label: 'router' },
               { value: 'route', label: 'route' },
               { value: 'step', label: 'step' },
-              { value: 'code', label: 'code' },
             ]}
           />
         </div>
         {(data.stats.services ?? 0) > 0 && (
-          <Button
-            variant={parts[0] === 'rpc' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => goto('/rpc')}
+          <AppLink
+            href="/rpc"
+            className={buttonVariants({
+              variant: parts[0] === 'rpc' ? 'default' : 'ghost',
+              size: 'sm',
+            })}
           >
             rpc <span className="text-[10px] opacity-70">{data.stats.rpcs}</span>
-          </Button>
+          </AppLink>
         )}
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
@@ -274,12 +285,9 @@ function Crumbs() {
         <span key={i} className="flex items-center gap-1.5">
           {i > 0 && <span className="text-faint">›</span>}
           {c.href && i < crumbs.length - 1 ? (
-            <button
-              className="hover:bg-panel hover:text-ink rounded-[3px] px-1"
-              onClick={() => goto(c.href!)}
-            >
+            <AppLink href={c.href} className="hover:bg-panel hover:text-ink rounded-[3px] px-1">
               {c.label}
-            </button>
+            </AppLink>
           ) : (
             <span className={i === crumbs.length - 1 ? 'text-ink' : ''}>{c.label}</span>
           )}
@@ -350,7 +358,7 @@ function Shell() {
       <div className="relative min-h-0 flex-1">
         <Outlet />
       </div>
-      <div className="text-faint pointer-events-none absolute bottom-2 left-4 text-[10px]">
+      <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
         click any box to open it · right-click for actions · esc goes back · ⌘K searches
       </div>
       {toast && (
@@ -484,16 +492,21 @@ function CallsList({ calls }: { calls?: Call[] }) {
         {calls.map((c, i) => (
           <div key={i} className="flex items-baseline gap-2 text-[11.5px]">
             <span className="text-ink">{c.e}</span>
-            {c.f && (
-              <button
-                className="text-faint hover:text-acc truncate text-[10px]"
-                onClick={() => goto(`/f?k=${encodeURIComponent(c.k ?? '')}`)}
-                disabled={!c.k}
-              >
-                {c.f}
-                {c.l ? `:${c.l}` : ''}
-              </button>
-            )}
+            {c.f &&
+              (c.k ? (
+                <AppLink
+                  href={`/f?k=${encodeURIComponent(c.k)}`}
+                  className="text-faint hover:text-acc truncate text-[10px]"
+                >
+                  {c.f}
+                  {c.l ? `:${c.l}` : ''}
+                </AppLink>
+              ) : (
+                <span className="text-faint truncate text-[10px]">
+                  {c.f}
+                  {c.l ? `:${c.l}` : ''}
+                </span>
+              ))}
             {c.d && <span className="text-faint truncate text-[10px]">{c.d}</span>}
           </div>
         ))}
@@ -668,7 +681,7 @@ function MessageSheet({
 
 type ExtCall = { g: string; n: string; fk?: string; f?: string; l?: number; ev?: string }
 
-function ExternalCalls({ items, onFn }: { items: ExtCall[]; onFn?: (key: string) => void }) {
+function ExternalCalls({ items, onFn }: { items: ExtCall[]; onFn?: (key: string) => string }) {
   const groups = ['db', 'cache', 'net']
     .map((g) => ({ g, items: items.filter((x) => x.g === g) }))
     .filter((x) => x.items.length > 0)
@@ -686,13 +699,12 @@ function ExternalCalls({ items, onFn }: { items: ExtCall[]; onFn?: (key: string)
             {group.items.map((x, i) => (
               <div key={`${x.g}:${x.n}:${x.f ?? ''}:${x.l ?? 0}:${i}`} className="py-1.5">
                 {x.fk && onFn ? (
-                  <button
-                    type="button"
-                    onClick={() => onFn(x.fk!)}
+                  <AppLink
+                    href={onFn(x.fk)}
                     className="text-acc block text-left font-mono text-[10.5px] leading-relaxed break-words hover:underline"
                   >
                     {x.n}
-                  </button>
+                  </AppLink>
                 ) : (
                   <code className="text-ink block font-mono text-[10.5px] leading-relaxed break-words">
                     {x.n}
@@ -721,7 +733,7 @@ function TraceRows({
 }: {
   steps: Step[]
   depth?: number
-  onFn?: (key: string) => void
+  onFn?: (key: string) => string
   limit?: number
 }) {
   const list = steps.slice(0, depth === 0 ? limit : 2)
@@ -741,13 +753,12 @@ function TraceRows({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   {s.fk && onFn ? (
-                    <button
-                      type="button"
-                      onClick={() => onFn(s.fk!)}
+                    <AppLink
+                      href={onFn(s.fk)}
                       className={`text-acc text-left font-mono text-[10.5px] leading-relaxed break-words hover:underline`}
                     >
                       {s.t}
-                    </button>
+                    </AppLink>
                   ) : (
                     <div
                       className={`font-mono text-[10.5px] leading-relaxed break-words ${
@@ -798,7 +809,7 @@ function TraceRows({
   )
 }
 
-function EffectRows({ items, onFn }: { items: Effect[]; onFn?: (key: string) => void }) {
+function EffectRows({ items, onFn }: { items: Effect[]; onFn?: (key: string) => string }) {
   return (
     <div className="divide-line/40 border-line/40 divide-y border-y">
       {items.map((x, i) => (
@@ -808,13 +819,12 @@ function EffectRows({ items, onFn }: { items: Effect[]; onFn?: (key: string) => 
           </Badge>
           <div className="min-w-0 flex-1">
             {x.fk && onFn ? (
-              <button
-                type="button"
-                onClick={() => onFn(x.fk!)}
+              <AppLink
+                href={onFn(x.fk)}
                 className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
               >
                 {x.n}
-              </button>
+              </AppLink>
             ) : (
               <code className="text-ink font-mono text-[10.5px] break-words">{x.n}</code>
             )}
@@ -836,7 +846,7 @@ function TriggeredBy({
 }: {
   event?: StreamEvent
   isSse: boolean
-  onFn?: (key: string) => void
+  onFn?: (key: string) => string
 }) {
   const origins = event?.or ?? []
   if (!origins.length) {
@@ -863,32 +873,29 @@ function TriggeredBy({
             <Badge variant={o.k === 'route' ? 'info' : 'plain'}>{o.k ?? 'background'}</Badge>
             <div className="min-w-0 flex-1">
               {o.k === 'route' && o.p ? (
-                <button
-                  type="button"
-                  onClick={() => goto(routeHref(o.ri ?? 0))}
+                <AppLink
+                  href={routeHref(o.ri ?? 0)}
                   className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
                 >
                   {o.m} {o.p}
-                </button>
+                </AppLink>
               ) : o.fk && onFn ? (
-                <button
-                  type="button"
-                  onClick={() => onFn(o.fk!)}
+                <AppLink
+                  href={onFn(o.fk)}
                   className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
                 >
                   {o.n}
-                </button>
+                </AppLink>
               ) : (
                 <div className="text-ink font-mono text-[10.5px] break-words">{o.n}</div>
               )}
               {o.k === 'route' && o.fk && onFn ? (
-                <button
-                  type="button"
-                  onClick={() => onFn(o.fk!)}
+                <AppLink
+                  href={onFn(o.fk)}
                   className="text-acc mt-0.5 font-mono text-[9px] hover:underline"
                 >
                   method ›
-                </button>
+                </AppLink>
               ) : null}
               {o.via ? <div className="text-faint text-[9px]">via {o.via}</div> : null}
               {o.f ? (
@@ -1004,7 +1011,7 @@ function StreamBoard({
     : handlerStage?.fk
       ? fnHref(handlerStage.fk, { ri, si: route.ch.length - 1 })
       : undefined
-  const openFn = (key: string) => goto(fnHref(key, { ri, si: Math.max(0, route.ch.length - 1) }))
+  const openFn = (key: string) => fnHref(key, { ri, si: Math.max(0, route.ch.length - 1) })
   const frameCount = exchange
     ? exchange.inbound.length + exchange.outbound.length
     : active === '__preamble'
@@ -1140,9 +1147,12 @@ function StreamBoard({
                 </div>
               </div>
               {handlerHref && (
-                <Button variant="outline" size="sm" onClick={() => goto(handlerHref)}>
+                <AppLink
+                  href={handlerHref}
+                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                >
                   <Code2 className="size-3" /> handler
-                </Button>
+                </AppLink>
               )}
             </div>
 
@@ -1206,13 +1216,12 @@ function StreamBoard({
                         </span>
                       ) : null}
                       {flowKey ? (
-                        <button
-                          type="button"
-                          onClick={() => openFn(flowKey)}
+                        <AppLink
+                          href={fnHref(flowKey, { ri, si: Math.max(0, route.ch.length - 1) })}
                           className="text-acc ml-auto text-[9.5px] tracking-normal normal-case hover:underline"
                         >
                           full flow ›
-                        </button>
+                        </AppLink>
                       ) : null}
                     </div>
                     <TraceRows steps={eventFlow.flow} onFn={openFn} limit={sharedFlow ? 9 : 3} />
@@ -1317,7 +1326,7 @@ function RouterView() {
   const count = data.routes.filter(
     (r) =>
       (proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto) &&
-      (focus ? r.p.startsWith('/' + focus + '/') : true),
+      (focus ? r.p === '/' + focus || r.p.startsWith('/' + focus + '/') : true),
   ).length
 
   return (
@@ -1653,17 +1662,18 @@ function TypeView() {
   const t: SynType | undefined = data.types?.[key]
   if (!t) return <div className="text-faint p-6 text-[12px]">this type is not in the module</div>
   const iface = search.i ? data.types?.[search.i] : undefined
-  const ri = Number(search.ri ?? '')
-  const si = Number(search.si ?? '')
-  const origin = Number.isFinite(ri) ? `&ri=${ri}${Number.isFinite(si) ? `&si=${si}` : ''}` : ''
-  const openMethod = (mk?: string) => {
+  const ri = numParam(search.ri)
+  const si = numParam(search.si)
+  const origin =
+    ri !== undefined && data.routes[ri] ? `&ri=${ri}${si !== undefined ? `&si=${si}` : ''}` : ''
+  const methodHref = (mk?: string) => {
     if (!mk) return
     const sk = t.k === 'struct' ? t.key : undefined
     const ik = t.k === 'interface' ? t.key : iface?.key
     const q = [`k=${encodeURIComponent(mk)}`]
     if (ik) q.push(`i=${encodeURIComponent(ik)}`)
     if (sk) q.push(`t=${encodeURIComponent(sk)}`)
-    goto(`/f?${q.join('&')}${origin}`)
+    return `/f?${q.join('&')}${origin}`
   }
   // resolve a field's written type back to a catalog entry, so fields with a
   // struct or interface type can be opened like methods
@@ -1706,13 +1716,9 @@ function TypeView() {
               )}
               {(t.fields ?? []).map((f) => {
                 const ft = fieldType(f.t)
-                return (
-                  <button
-                    key={f.n + f.t}
-                    disabled={!ft}
-                    onClick={() => ft && goto(`/t?k=${encodeURIComponent(ft.key)}${origin}`)}
-                    className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${ft ? 'hover:bg-panel2' : 'cursor-default'}`}
-                  >
+                const href = ft ? `/t?k=${encodeURIComponent(ft.key)}${origin}` : undefined
+                const body = (
+                  <>
                     <span className="text-ink">{f.n}</span>
                     <span className="text-info truncate">{f.t}</span>
                     {f.e && (
@@ -1721,7 +1727,17 @@ function TypeView() {
                       </span>
                     )}
                     {ft && <span className="text-faint ml-auto shrink-0 text-[9px]">open ›</span>}
-                  </button>
+                  </>
+                )
+                const cls = `flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${ft ? 'hover:bg-panel2' : ''}`
+                return href ? (
+                  <AppLink key={f.n + f.t} href={href} className={cls}>
+                    {body}
+                  </AppLink>
+                ) : (
+                  <div key={f.n + f.t} className={cls}>
+                    {body}
+                  </div>
                 )
               })}
             </div>
@@ -1735,18 +1751,29 @@ function TypeView() {
             {(t.methods ?? []).length === 0 && (
               <div className="text-faint px-3 py-2 text-[11px]">no methods</div>
             )}
-            {(t.methods ?? []).map((m) => (
-              <button
-                key={m.n + (m.k ?? '')}
-                disabled={!m.k}
-                onClick={() => openMethod(m.k)}
-                className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${m.k ? 'hover:bg-panel2' : 'cursor-default'}`}
-              >
-                <span className="text-ink">{m.n}</span>
-                <span className="text-mut min-w-0 flex-1 truncate">{m.sig}</span>
-                {m.k && <span className="text-faint shrink-0 text-[9px]">open ›</span>}
-              </button>
-            ))}
+            {(t.methods ?? []).map((m) => {
+              // flows are baked from routes, so a method in the catalog does
+              // not always have one. Linking it would land on a dead page.
+              const traced = Boolean(m.k && data.flows[m.k])
+              const href = traced ? methodHref(m.k) : undefined
+              const body = (
+                <>
+                  <span className="text-ink">{m.n}</span>
+                  <span className="text-mut min-w-0 flex-1 truncate">{m.sig}</span>
+                  {traced && <span className="text-faint shrink-0 text-[9px]">open ›</span>}
+                </>
+              )
+              const cls = `flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${traced ? 'hover:bg-panel2' : ''}`
+              return href ? (
+                <AppLink key={m.n + (m.k ?? '')} href={href} className={cls}>
+                  {body}
+                </AppLink>
+              ) : (
+                <div key={m.n + (m.k ?? '')} className={cls}>
+                  {body}
+                </div>
+              )
+            })}
           </div>
         </section>
         {t.k === 'interface' && (
@@ -1762,17 +1789,15 @@ function TypeView() {
                 const it = data.types?.[ik]
                 if (!it) return null
                 return (
-                  <button
+                  <AppLink
                     key={ik}
-                    onClick={() =>
-                      goto(`/t?k=${encodeURIComponent(ik)}&i=${encodeURIComponent(t.key)}${origin}`)
-                    }
+                    href={`/t?k=${encodeURIComponent(ik)}&i=${encodeURIComponent(t.key)}${origin}`}
                     className="hover:bg-panel2 flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px]"
                   >
                     <span className="text-ink">{it.n}</span>
                     <span className="text-mut min-w-0 flex-1 truncate">{it.pkg}</span>
                     <span className="text-faint text-[9px]">open ›</span>
-                  </button>
+                  </AppLink>
                 )
               })}
             </div>
@@ -1788,14 +1813,14 @@ function TypeView() {
                 const it = data.types?.[ik]
                 if (!it) return null
                 return (
-                  <button
+                  <AppLink
                     key={ik}
-                    onClick={() => goto(`/t?k=${encodeURIComponent(ik)}${origin}`)}
+                    href={`/t?k=${encodeURIComponent(ik)}${origin}`}
                     className="hover:bg-panel2 flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px]"
                   >
                     <span className="text-ink">{it.n}</span>
                     <span className="text-mut min-w-0 flex-1 truncate">{it.pkg}</span>
-                  </button>
+                  </AppLink>
                 )
               })}
             </div>
@@ -1878,9 +1903,9 @@ function RPCView() {
             </header>
             <div className="divide-line/60 divide-y">
               {s.methods.map((m, mi) => (
-                <button
+                <AppLink
                   key={m.n}
-                  onClick={() => goto(`/rpc/${si}/${mi}`)}
+                  href={`/rpc/${si}/${mi}`}
                   className="hover:bg-panel2 flex w-full flex-col gap-1 px-3 py-2 text-left"
                 >
                   <div className="flex items-baseline gap-2">
@@ -1894,7 +1919,7 @@ function RPCView() {
                     <span className="truncate">{m.rs || 'response'}</span>
                   </div>
                   {m.d && <div className="text-mut line-clamp-2 text-[10.5px]">{m.d}</div>}
-                </button>
+                </AppLink>
               ))}
             </div>
           </section>
@@ -1988,13 +2013,12 @@ function RPCMethodView() {
           copy
         </Button>
         {method.fk && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => goto(`/f?k=${encodeURIComponent(method.fk!)}`)}
+          <AppLink
+            href={`/f?k=${encodeURIComponent(method.fk)}`}
+            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
           >
             open flow
-          </Button>
+          </AppLink>
         )}
       </div>
       {flow && (

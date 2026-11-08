@@ -484,6 +484,13 @@ func isResponseCall(c Call) bool {
 			"AbortWithStatusJSON", "AbortWithStatus":
 			return true
 		}
+	case "e":
+		// PocketBase's RequestEvent embeds echo.Context.
+		switch c.Sel {
+		case "JSON", "JSONPretty", "JSONBlob", "XML", "XMLPretty", "XMLBlob", "HTML", "HTMLBlob",
+			"String", "Blob", "Stream", "File", "Attachment", "Inline", "NoContent", "Redirect", "Error":
+			return true
+		}
 	}
 	return false
 }
@@ -586,12 +593,17 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 // (writeError) gives several, and the caller shows all of them. The walk is
 // cycle-safe and bounded so a recursive helper cannot trap it.
 type statusWalk struct {
-	onPath map[*Func]bool
-	budget int
+	onPath    map[*Func]bool
+	localPath map[string]bool
+	budget    int
 }
 
 func newStatusWalk() *statusWalk {
-	return &statusWalk{onPath: map[*Func]bool{}, budget: 400}
+	return &statusWalk{
+		onPath:    map[*Func]bool{},
+		localPath: map[string]bool{},
+		budget:    400,
+	}
 }
 
 func (w *statusWalk) callStatuses(ce *ast.CallExpr, calls map[string]Call, fn *Func, bind map[string]map[string]bool) map[string]bool {
@@ -788,6 +800,14 @@ func (w *statusWalk) localStatuses(fn *Func, name string, bind map[string]map[st
 	if fn == nil || fn.Decl == nil || fn.Decl.Body == nil {
 		return out
 	}
+	// bindArgs starts a fresh seen map, so an argument that is assigned from a
+	// call taking itself can bounce between localStatuses and statusArg forever.
+	key := fn.Key + "\x00" + name
+	if w.localPath[key] {
+		return out
+	}
+	w.localPath[key] = true
+	defer delete(w.localPath, key)
 	take := func(e ast.Expr) {
 		for code := range w.statusArg(e, fn, bind, seen) {
 			out[code] = true

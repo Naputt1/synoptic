@@ -217,7 +217,7 @@ export function buildRouterScene(
       const id = 'g:' + path
       const name = path.split('/').pop() ?? path
       const count = d.routes.filter(
-        (r) => active(r) && (r.p === '/' + path + '/' || r.p.startsWith('/' + path + '/')),
+        (r) => active(r) && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
       ).length
       if (!colPath.has(level + 1)) colPath.set(level + 1, path)
       nodes.push(
@@ -245,7 +245,9 @@ export function buildRouterScene(
   for (const path of set) {
     const id = 'g:' + path
     const name = path.split('/').pop() ?? path
-    const count = d.routes.filter((r) => active(r) && r.p.startsWith('/' + path + '/')).length
+    const count = d.routes.filter(
+      (r) => active(r) && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
+    ).length
     if (!colPath.has(openDepth + 1)) colPath.set(openDepth + 1, path)
     nodes.push(
       node(
@@ -452,6 +454,22 @@ export function buildPipelineScene(
   })
 
   const last = r.ch.length
+  const lastFlow = r.ch[last - 1]?.fk ? flows?.[r.ch[last - 1].fk!] : undefined
+  const retCodes = [
+    ...new Set((lastFlow?.flow ?? []).filter((s) => s.k === 'ret').flatMap((s) => codesOf(s))),
+  ].sort()
+  const earlyCodes = [...new Set(early.flatMap((e) => e.label.split(' · ')))].filter((c) =>
+    /^\d{3}$/.test(c),
+  )
+  const responseSub = r.pr
+    ? `${r.pr === 'ws' ? 'websocket' : 'event stream'} · ${r.st?.events?.length ?? 0} message types`
+    : [
+        retCodes.length ? `${retCodes.join(' · ')} out` : undefined,
+        earlyCodes.length ? `early ${earlyCodes.join(' · ')}` : undefined,
+        timing ? `per request, from ${timing.spans} spans` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' · ') || undefined
   nodes.push(
     node(
       'out',
@@ -460,11 +478,7 @@ export function buildPipelineScene(
       {
         kind: 'response',
         title: r.pr ? 'stream open' : 'response out',
-        sub: r.pr
-          ? `${r.pr === 'ws' ? 'websocket' : 'event stream'} · ${r.st?.events?.length ?? 0} message types`
-          : timing
-            ? `per request, from ${timing.spans} spans`
-            : undefined,
+        sub: responseSub,
         index: last + 1,
         ms: timing ? msOf(timing.total) : undefined,
       },

@@ -54,22 +54,26 @@ export function ExitEdge({
           strokeWidth={open ? 2 : 1.4}
         />
       </g>
-      {open && (
-        <EdgeLabelRenderer>
-          <div
-            style={{ transform: `translate(-100%,-50%) translate(${jointX - 12}px,${jointY}px)` }}
-            className="border-warn/45 bg-panel2 pointer-events-none absolute w-[184px] rounded-[4px] border px-2.5 py-1.5 text-[10.5px] leading-relaxed shadow-[0_6px_20px_-8px_rgba(0,0,0,0.9)]"
-          >
-            <div className="text-faint mb-1 font-mono text-[9px] tracking-[0.14em] uppercase">
-              early return
-            </div>
-            <div className="text-warn font-mono">{text}</div>
-            <div className="text-mut mt-1 text-[10px]">
-              this stage can leave before the next one runs
-            </div>
-          </div>
-        </EdgeLabelRenderer>
-      )}
+      <EdgeLabelRenderer>
+        <div
+          style={{ transform: `translate(-100%,-50%) translate(${jointX - 12}px,${jointY}px)` }}
+          className={`pointer-events-none absolute ${open ? 'border-warn/45 bg-panel2 w-[184px] rounded-[4px] border px-2.5 py-1.5 text-[10.5px] leading-relaxed shadow-[0_6px_20px_-8px_rgba(0,0,0,0.9)]' : 'border-warn/45 bg-panel2 text-warn rounded-[3px] border px-1.5 py-0.5 font-mono text-[9px] leading-none'}`}
+        >
+          {open ? (
+            <>
+              <div className="text-faint mb-1 font-mono text-[9px] tracking-[0.14em] uppercase">
+                early return
+              </div>
+              <div className="text-warn font-mono">{text}</div>
+              <div className="text-mut mt-1 text-[10px]">
+                this stage can leave before the next one runs
+              </div>
+            </>
+          ) : (
+            <>early</>
+          )}
+        </div>
+      </EdgeLabelRenderer>
     </>
   )
 }

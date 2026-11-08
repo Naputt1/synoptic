@@ -6,6 +6,8 @@ import { routeHref } from '@/lib/data'
 import { goto } from '@/lib/nav'
 import type { Data, Route } from '@/lib/types'
 
+import { AppLink } from './link'
+
 type Via = 'path' | 'stage' | 'file' | 'stream' | 'doc'
 
 type Hit = { r: Route; i: number; via: Via; score: number }
@@ -190,14 +192,17 @@ export function SearchDialog({
                 </div>
               )}
               {results.map(({ r, i, via }, idx) => (
-                <div
+                <AppLink
                   key={i}
+                  href={routeHref(i)}
                   id={`${listId}-${idx}`}
                   role="option"
                   aria-selected={idx === activeIndex}
                   onMouseEnter={() => setActive(idx)}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pick(i)}
+                  onMouseDown={(e) => {
+                    if (e.button === 0) e.preventDefault()
+                  }}
+                  onClick={() => onOpenChange(false)}
                   className={`text-ink flex cursor-pointer items-center gap-2 rounded-[4px] px-2 py-1.5 text-[12px] ${
                     idx === activeIndex ? 'bg-acc/10' : ''
                   }`}
@@ -220,7 +225,7 @@ export function SearchDialog({
                   >
                     {via}
                   </span>
-                </div>
+                </AppLink>
               ))}
             </div>
           </div>

@@ -2,6 +2,8 @@ import { Handle, type NodeProps, Position } from '@xyflow/react'
 import { motion, useReducedMotion } from 'motion/react'
 import { memo } from 'react'
 
+import { AppLink } from '../components/ui/link'
+import { absoluteLink } from '../lib/actions'
 import { statusBadgeTone, type StatusTone, statusTone } from '../lib/status'
 import { CardMenu } from './NodeMenu'
 import type { SData, SNode } from './scenes'
@@ -114,6 +116,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
   const isReturn = d.kind === 'return'
   const isInput = d.kind === 'input'
   const clickable = Boolean(d.href)
+  const href = typeof d.href === 'string' ? d.href : undefined
   const isLabel = d.kind === 'label'
 
   if (isLabel) {
@@ -213,6 +216,11 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
         style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
         title={d.full}
         onContextMenu={(e) => e.stopPropagation()}
+        onAuxClick={(e) => {
+          if (e.button !== 1 || !d.jump || !href) return
+          if ((e.target as Element).closest?.('[data-open]')) return
+          window.open(absoluteLink(href), '_blank')
+        }}
         className={[
           'relative flex flex-col justify-center overflow-hidden rounded-[6px] border px-2.5 py-2 text-ink',
           isBanner
@@ -259,16 +267,17 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
               {d.badge}
             </span>
           )}
-          {clickable && (
-            <span
+          {href && (
+            <AppLink
+              href={href}
               data-open
-              role="link"
               aria-label={`open ${d.title}`}
-              className="text-faint hover:border-line hover:bg-panel2 hover:text-acc shrink-0 cursor-pointer rounded-[3px] border border-transparent px-1 py-0.5 text-[10px] transition-colors"
+              className="nopan nodrag text-faint hover:border-line hover:bg-panel2 hover:text-acc shrink-0 cursor-pointer rounded-[3px] border border-transparent px-1 py-0.5 text-[10px] transition-colors"
               title="open this function"
+              onClick={(e) => e.stopPropagation()}
             >
               open ›
-            </span>
+            </AppLink>
           )}
         </div>
 

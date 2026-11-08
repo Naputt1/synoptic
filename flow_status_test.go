@@ -157,6 +157,19 @@ func handleErrorResponse(c *Ctx, err error) {
 		return c.WriteMsgpack(m)
 	}
 }
+
+type Event struct{}
+
+func (e *Event) JSON(code int, v any) error { return nil }
+
+func (e *Event) Error(code int, message string, data any) error { return nil }
+
+func handlePocketBase(e *Event) error {
+	if !allowed() {
+		return e.Error(403, "forbidden", nil)
+	}
+	return e.JSON(200, map[string]any{"ok": true})
+}
 `
 
 func loadStatusFixture(t *testing.T) *Module {
@@ -226,6 +239,8 @@ func TestStatusesFollowHelpers(t *testing.T) {
 		{"handleNested", retCodes(buildFlow(m.PKG["example.com/fixture"]["handleNested"])), []string{"200", "400", "500"}},
 		{"handleReturnedStatus", retCodes(buildFlow(m.PKG["example.com/fixture"]["handleReturnedStatus"])), []string{"201"}},
 		{"handleSwitch", retCodes(buildFlow(m.PKG["example.com/fixture"]["handleSwitch"])), []string{"201", "401", "503"}},
+		{"handlePocketBaseExit", exitCodes(buildFlow(m.PKG["example.com/fixture"]["handlePocketBase"])), []string{"403"}},
+		{"handlePocketBaseReturn", retCodes(buildFlow(m.PKG["example.com/fixture"]["handlePocketBase"])), []string{"200"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
