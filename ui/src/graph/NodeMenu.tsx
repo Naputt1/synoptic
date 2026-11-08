@@ -1,5 +1,6 @@
-import type { ReactElement } from 'react'
 import { Code2, Copy, ExternalLink, FileCode2, Link2, Route, Terminal, Type } from 'lucide-react'
+import type { ReactElement } from 'react'
+
 import {
   ContextMenu,
   ContextMenuContent,
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/context-menu'
 import { absoluteLink, copyValue, showSource } from '@/lib/actions'
 import { goto } from '@/lib/nav'
+
 import type { SData } from './scenes'
 
 const KIND: Record<string, string> = {
@@ -52,14 +54,13 @@ export function NodeMenu({ d }: { d: SData }) {
   const curl = typeof d.curl === 'string' ? d.curl : undefined
   const source = Boolean(d.source && line)
   const ref = file && line ? `${file}:${line}` : undefined
-  const heading =
-    d.kind === 'route' && d.method && d.full ? `${d.method} ${d.full}` : d.title
+  const heading = d.kind === 'route' && d.method && d.full ? `${d.method} ${d.full}` : d.title
 
   return (
     <ContextMenuContent className="w-[224px]">
       <ContextMenuLabel className="truncate">
         {KIND[d.kind] ?? d.kind} <span className="text-faint">·</span>{' '}
-        <span className="normal-case tracking-normal text-mut">{heading}</span>
+        <span className="text-mut tracking-normal normal-case">{heading}</span>
       </ContextMenuLabel>
       <ContextMenuSeparator />
       {href && (
@@ -69,7 +70,9 @@ export function NodeMenu({ d }: { d: SData }) {
       )}
       {source && (
         <ContextMenuItem
-          onSelect={() => showSource(line!, d.lines as number[] | undefined, d.startLine as number | undefined)}
+          onSelect={() =>
+            showSource(line!, d.lines as number[] | undefined, d.startLine as number | undefined)
+          }
         >
           <Code2 /> View source
         </ContextMenuItem>

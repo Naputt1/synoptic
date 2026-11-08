@@ -1,4 +1,5 @@
 import * as ToggleGroup from '@radix-ui/react-toggle-group'
+
 import { cn } from '@/lib/utils'
 
 type Option = { value: string; label: string; title?: string }
@@ -21,14 +22,14 @@ export function Segmented({
       onValueChange={(v) => {
         if (v) onChange(v)
       }}
-      className={cn('flex overflow-hidden rounded-[5px] border border-line', className)}
+      className={cn('border-line flex overflow-hidden rounded-[5px] border', className)}
     >
       {options.map((o) => (
         <ToggleGroup.Item
           key={o.value}
           value={o.value}
           title={o.title}
-          className="px-2 py-[3px] text-[11px] text-mut outline-none transition-colors hover:text-ink data-[state=on]:bg-acc/15 data-[state=on]:text-acc data-[state=on]:shadow-[inset_0_0_0_1px_rgba(88,224,183,0.28)] focus-visible:text-ink"
+          className="text-mut hover:text-ink data-[state=on]:bg-acc/15 data-[state=on]:text-acc focus-visible:text-ink px-2 py-[3px] text-[11px] transition-colors outline-none data-[state=on]:shadow-[inset_0_0_0_1px_rgba(88,224,183,0.28)]"
         >
           {o.label}
         </ToggleGroup.Item>

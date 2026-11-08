@@ -1,9 +1,10 @@
 import { Command as Cmdk } from 'cmdk'
 import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { Data, Route } from '@/lib/types'
+
 import { routeHref } from '@/lib/data'
 import { goto } from '@/lib/nav'
+import type { Data, Route } from '@/lib/types'
 
 type Via = 'path' | 'stage' | 'file' | 'stream' | 'doc'
 
@@ -16,15 +17,28 @@ function fields(r: Route) {
     ? [
         r.pr ?? '',
         ...(r.st.events ?? []),
-        ...(r.st.send ?? []).flatMap((m) => [m.n ?? '', m.t ?? '', m.e ?? '', ...(m.f ?? []).map((f) => f.n)]),
-        ...(r.st.recv ?? []).flatMap((m) => [m.n ?? '', m.t ?? '', m.e ?? '', ...(m.f ?? []).map((f) => f.n)]),
+        ...(r.st.send ?? []).flatMap((m) => [
+          m.n ?? '',
+          m.t ?? '',
+          m.e ?? '',
+          ...(m.f ?? []).map((f) => f.n),
+        ]),
+        ...(r.st.recv ?? []).flatMap((m) => [
+          m.n ?? '',
+          m.t ?? '',
+          m.e ?? '',
+          ...(m.f ?? []).map((f) => f.n),
+        ]),
       ]
         .join(' ')
         .toLowerCase()
     : ''
   return {
     path: (r.m + ' ' + r.p + ' ' + (r.pr ?? '')).toLowerCase(),
-    stage: r.ch.map((s) => s.n).join(' ').toLowerCase(),
+    stage: r.ch
+      .map((s) => s.n)
+      .join(' ')
+      .toLowerCase(),
     file: r.f.toLowerCase(),
     stream,
     doc: r.ch
@@ -70,7 +84,15 @@ function Highlight({ text, tokens }: { text: string; tokens: string[] }) {
   )
 }
 
-export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: boolean; onOpenChange: (v: boolean) => void }) {
+export function SearchDialog({
+  data,
+  open,
+  onOpenChange,
+}: {
+  data: Data
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}) {
   const [q, setQ] = useState('')
   const tokens = useMemo(() => q.trim().toLowerCase().split(/\s+/).filter(Boolean), [q])
   const all = useMemo(() => (q.trim() ? search(data.routes, q) : []), [q, data.routes])
@@ -95,28 +117,32 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
         shouldFilter={false}
         loop
         onMouseDown={(e) => e.stopPropagation()}
-        className="sheet-content relative z-10 w-[min(680px,92vw)] overflow-hidden rounded-[8px] border border-line bg-panel shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]"
+        className="sheet-content border-line bg-panel relative z-10 w-[min(680px,92vw)] overflow-hidden rounded-[8px] border shadow-[0_30px_80px_-30px_rgba(0,0,0,0.9)]"
       >
-        <div className="flex items-center gap-2 border-b border-line px-3 py-2 text-mut">
+        <div className="border-line text-mut flex items-center gap-2 border-b px-3 py-2">
           <Search className="size-3.5" />
           <Cmdk.Input
             autoFocus
             value={q}
             onValueChange={setQ}
             placeholder="method, protocol, path, stage, event, file or doc text — every word must match"
-            className="w-full bg-transparent text-[12.5px] text-ink outline-none placeholder:text-faint"
+            className="text-ink placeholder:text-faint w-full bg-transparent text-[12.5px] outline-none"
           />
-          <kbd className="rounded-[3px] border border-line px-1 text-[10px]">esc</kbd>
+          <kbd className="border-line rounded-[3px] border px-1 text-[10px]">esc</kbd>
         </div>
         <Cmdk.List className="max-h-[46vh] overflow-auto p-1.5">
           {q.trim() && results.length === 0 && (
-            <div className="px-2 py-6 text-center text-[12px] text-faint">
+            <div className="text-faint px-2 py-6 text-center text-[12px]">
               no route matches “{q.trim()}”
             </div>
           )}
-          {!q.trim() && <div className="px-2 py-2 text-[11px] text-faint">type to search {data.routes.length} routes</div>}
+          {!q.trim() && (
+            <div className="text-faint px-2 py-2 text-[11px]">
+              type to search {data.routes.length} routes
+            </div>
+          )}
           {q.trim() && results.length > 0 && (
-            <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-[0.12em] text-faint">
+            <div className="text-faint px-2 pt-0.5 pb-1 text-[10px] tracking-[0.12em] uppercase">
               {all.length} {all.length === 1 ? 'match' : 'matches'}
               {all.length > results.length ? ` — showing ${results.length}` : ''}
             </div>
@@ -126,7 +152,7 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
               key={i}
               value={String(i)}
               onSelect={() => pick(i)}
-              className="flex cursor-pointer items-center gap-2 rounded-[4px] px-2 py-1.5 text-[12px] text-ink data-[selected=true]:bg-acc/10"
+              className="text-ink data-[selected=true]:bg-acc/10 flex cursor-pointer items-center gap-2 rounded-[4px] px-2 py-1.5 text-[12px]"
             >
               <span className={`w-12 shrink-0 text-[10px] ${r.pr ? 'text-acc' : 'text-info'}`}>
                 {r.pr ? r.pr.toUpperCase() : r.m}
@@ -134,9 +160,9 @@ export function SearchDialog({ data, open, onOpenChange }: { data: Data; open: b
               <span className="min-w-0 flex-1 truncate font-mono">
                 <Highlight text={r.p} tokens={tokens} />
               </span>
-              <span className="shrink-0 text-[10px] text-faint">{r.ch.at(-1)?.n}</span>
+              <span className="text-faint shrink-0 text-[10px]">{r.ch.at(-1)?.n}</span>
               <span
-                className={`w-9 shrink-0 text-right text-[9px] uppercase tracking-[0.1em] ${
+                className={`w-9 shrink-0 text-right text-[9px] tracking-[0.1em] uppercase ${
                   via === 'path' || via === 'stream'
                     ? 'text-acc'
                     : via === 'stage'

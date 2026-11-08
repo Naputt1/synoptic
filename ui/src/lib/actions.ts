@@ -49,9 +49,7 @@ export function absoluteLink(href: string): string {
 }
 
 export function showSource(line: number, lines?: number[], startLine?: number) {
-  window.dispatchEvent(
-    new CustomEvent('synoptic:source', { detail: { line, lines, startLine } }),
-  )
+  window.dispatchEvent(new CustomEvent('synoptic:source', { detail: { line, lines, startLine } }))
 }
 
 export function openSearch() {

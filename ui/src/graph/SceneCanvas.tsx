@@ -1,17 +1,17 @@
-import { ExitEdge } from './ExitEdge'
 import {
   Background,
   BackgroundVariant,
   Controls,
+  type NodeMouseHandler,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
   useNodesState,
   useReactFlow,
-  type NodeMouseHandler,
 } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Link2, LocateFixed, MousePointerClick, Search } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,16 +21,17 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import type { SData } from './scenes'
-import { goto } from '../lib/nav'
+
 import { copyValue, openSearch } from '../lib/actions'
+import { goto } from '../lib/nav'
 import { BranchEdge } from './BranchEdge'
+import { ExitEdge } from './ExitEdge'
 import { FlowEdge } from './FlowEdge'
 import { JoinEdge } from './JoinEdge'
 import { LoopEdge } from './LoopEdge'
 import { ReturnEdge } from './ReturnEdge'
 import { SceneNode } from './SceneNode'
-import type { Scene, SNode } from './scenes'
+import type { Scene, SData, SNode } from './scenes'
 
 const nodeTypes = { scene: SceneNode }
 const edgeTypes = {
@@ -107,7 +108,8 @@ function Inner({ scene }: { scene: Scene }) {
       const floor = scene.key.startsWith('router:') ? 0.86 : 0.62
       const zoom = Math.max(floor, Math.min(1.35, fitZoom))
       const centredX = fitZoom < 0.62 ? 56 : (w - box.w * zoom) / 2
-      const centredY = fitZoom < 0.62 ? 56 : box.h * zoom < h - 160 ? Math.max(48, (h - box.h * zoom) / 2) : 48
+      const centredY =
+        fitZoom < 0.62 ? 56 : box.h * zoom < h - 160 ? Math.max(48, (h - box.h * zoom) / 2) : 48
       setViewport(
         {
           x: centredX - box.x * zoom,
@@ -125,7 +127,7 @@ function Inner({ scene }: { scene: Scene }) {
       ro.disconnect()
       window.clearTimeout(retry)
     }
-  }, [scene.key, nodesInitialized, setViewport])
+  }, [scene.key, nodesInitialized, setViewport, fitView])
 
   const onNodeClick = useCallback<NodeMouseHandler<SNode>>((e, n) => {
     const input = n.data.input as string | undefined

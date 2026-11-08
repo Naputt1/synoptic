@@ -3,7 +3,15 @@ export type StatusTone = 'ok' | 'info' | 'warn' | 'bad' | 'mut'
 /** Tone of an HTTP status code, or a label that starts with one ("200 out"). */
 export function statusTone(code?: string): StatusTone {
   const first = (code ?? '').trim().charAt(0)
-  return first === '2' ? 'ok' : first === '3' ? 'info' : first === '4' ? 'warn' : first === '5' ? 'bad' : 'mut'
+  return first === '2'
+    ? 'ok'
+    : first === '3'
+      ? 'info'
+      : first === '4'
+        ? 'warn'
+        : first === '5'
+          ? 'bad'
+          : 'mut'
 }
 
 /** Every status a step can answer with, whether it is one code or several. */

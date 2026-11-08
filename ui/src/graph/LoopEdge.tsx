@@ -1,5 +1,6 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 import { memo } from 'react'
+
 import type { SEdge } from './scenes'
 
 /**
@@ -41,7 +42,7 @@ function LoopEdgeInner({ id, label, sourceX, sourceY, targetX, targetY, data }: 
         <EdgeLabelRenderer>
           <div
             style={{ transform: `translate(-50%,-50%) translate(${lx}px,${ly}px)` }}
-            className="pointer-events-none absolute rounded-[3px] border border-acc/25 bg-canvas/95 px-1 text-[8.5px] tracking-[0.06em] text-acc"
+            className="border-acc/25 bg-canvas/95 text-acc pointer-events-none absolute rounded-[3px] border px-1 text-[8.5px] tracking-[0.06em]"
           >
             {text}
           </div>

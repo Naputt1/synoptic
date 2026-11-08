@@ -1,13 +1,37 @@
-import { useEffect, useRef } from 'react'
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, type ReactNode, useEffect, useRef } from 'react'
 
 const KEYWORDS = new Set([
-  'break','case','chan','const','continue','default','defer','else','fallthrough','for','func','go','goto','if','import','interface','map','package','range','return','select','struct','switch','type','var',
+  'break',
+  'case',
+  'chan',
+  'const',
+  'continue',
+  'default',
+  'defer',
+  'else',
+  'fallthrough',
+  'for',
+  'func',
+  'go',
+  'goto',
+  'if',
+  'import',
+  'interface',
+  'map',
+  'package',
+  'range',
+  'return',
+  'select',
+  'struct',
+  'switch',
+  'type',
+  'var',
 ])
 
 const LITERALS = new Set(['true', 'false', 'nil', 'iota'])
 
-const TOKEN = /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)/g
+const TOKEN =
+  /(\/\/[^\n]*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)/g
 
 function highlight(line: string): ReactNode {
   const out: ReactNode[] = []
@@ -17,19 +41,52 @@ function highlight(line: string): ReactNode {
     const at = m.index ?? 0
     if (at > last) out.push(<Fragment key={key++}>{line.slice(last, at)}</Fragment>)
     const [text, comment, str, num, word] = m
-    if (comment) out.push(<span key={key++} className="italic text-faint">{text}</span>)
-    else if (str) out.push(<span key={key++} className="text-warn/90">{text}</span>)
-    else if (num) out.push(<span key={key++} className="text-info">{text}</span>)
-    else if (word && KEYWORDS.has(word)) out.push(<span key={key++} className="text-acc">{text}</span>)
-    else if (word && LITERALS.has(word)) out.push(<span key={key++} className="text-info">{text}</span>)
+    if (comment)
+      out.push(
+        <span key={key++} className="text-faint italic">
+          {text}
+        </span>,
+      )
+    else if (str)
+      out.push(
+        <span key={key++} className="text-warn/90">
+          {text}
+        </span>,
+      )
+    else if (num)
+      out.push(
+        <span key={key++} className="text-info">
+          {text}
+        </span>,
+      )
+    else if (word && KEYWORDS.has(word))
+      out.push(
+        <span key={key++} className="text-acc">
+          {text}
+        </span>,
+      )
+    else if (word && LITERALS.has(word))
+      out.push(
+        <span key={key++} className="text-info">
+          {text}
+        </span>,
+      )
     else out.push(<Fragment key={key++}>{text}</Fragment>)
     last = at + text.length
   }
-  if (last < line.length) out.push(<Fragment key={key++}>{line.slice(last)}</Fragment>)
+  if (last < line.length) out.push(<Fragment key={key}>{line.slice(last)}</Fragment>)
   return out
 }
 
-export function GoSource({ code, focus, focusLines }: { code: string; focus?: number; focusLines?: number[] }) {
+export function GoSource({
+  code,
+  focus,
+  focusLines,
+}: {
+  code: string
+  focus?: number
+  focusLines?: number[]
+}) {
   const hits = useRef<Record<number, HTMLDivElement | null>>({})
   const active = focusLines?.length ? focusLines : focus ? [focus] : []
   const activeKey = active.join(',')
@@ -38,7 +95,7 @@ export function GoSource({ code, focus, focusLines }: { code: string; focus?: nu
     if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [activeKey])
   return (
-    <pre className="overflow-auto rounded-[6px] border border-line bg-[#061114] p-3 text-[11.5px] leading-[1.65] text-ink/90">
+    <pre className="border-line text-ink/90 overflow-auto rounded-[6px] border bg-[#061114] p-3 text-[11.5px] leading-[1.65]">
       <code>
         {code.split('\n').map((line, i) => {
           const on = active.includes(i + 1)
@@ -49,7 +106,13 @@ export function GoSource({ code, focus, focusLines }: { code: string; focus?: nu
                 'border-x border-acc/40 bg-acc/15',
                 above ? '' : 'border-t',
                 below ? '' : 'border-b',
-                above && below ? '' : above ? 'rounded-b-[3px]' : below ? 'rounded-t-[3px]' : 'rounded-[3px]',
+                above && below
+                  ? ''
+                  : above
+                    ? 'rounded-b-[3px]'
+                    : below
+                      ? 'rounded-t-[3px]'
+                      : 'rounded-[3px]',
               ].join(' ')
             : ''
           return (
@@ -60,7 +123,9 @@ export function GoSource({ code, focus, focusLines }: { code: string; focus?: nu
               }}
               className={'flex ' + edge}
             >
-              <span className="mr-3 inline-block w-7 shrink-0 select-none text-right text-faint/60">{i + 1}</span>
+              <span className="text-faint/60 mr-3 inline-block w-7 shrink-0 text-right select-none">
+                {i + 1}
+              </span>
               <span className="whitespace-pre">{highlight(line)}</span>
             </div>
           )

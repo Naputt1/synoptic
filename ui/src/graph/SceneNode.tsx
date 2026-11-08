@@ -1,11 +1,15 @@
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, type NodeProps, Position } from '@xyflow/react'
 import { motion, useReducedMotion } from 'motion/react'
 import { memo } from 'react'
-import type { SData, SNode } from './scenes'
-import { statusBadgeTone, statusTone, type StatusTone } from '../lib/status'
-import { CardMenu } from './NodeMenu'
 
-const returnTone: Record<StatusTone, { idle: string; done: string; cur: string; text: string; hover: string }> = {
+import { statusBadgeTone, type StatusTone, statusTone } from '../lib/status'
+import { CardMenu } from './NodeMenu'
+import type { SData, SNode } from './scenes'
+
+const returnTone: Record<
+  StatusTone,
+  { idle: string; done: string; cur: string; text: string; hover: string }
+> = {
   ok: {
     idle: 'border-acc/45 bg-panel/50',
     done: 'border-acc/60 bg-acc/[0.06]',
@@ -84,14 +88,16 @@ function Tag({ t }: { t: string }) {
                 : t === 'auth'
                   ? 'text-info border-info/40'
                   : kind === 'ctx'
-          ? 'text-info border-info/40'
-          : kind === 'query'
-            ? 'text-acc border-acc/40'
-            : kind === 'path' || kind === 'cookie' || kind === 'form'
-              ? 'text-warn border-warn/40'
-              : 'text-mut border-line'
+                    ? 'text-info border-info/40'
+                    : kind === 'query'
+                      ? 'text-acc border-acc/40'
+                      : kind === 'path' || kind === 'cookie' || kind === 'form'
+                        ? 'text-warn border-warn/40'
+                        : 'text-mut border-line'
   return (
-    <span className={`rounded-[3px] border px-1 py-px text-[10px] uppercase tracking-[0.1em] ${tone}`}>
+    <span
+      className={`rounded-[3px] border px-1 py-px text-[10px] tracking-[0.1em] uppercase ${tone}`}
+    >
       {label}
     </span>
   )
@@ -112,7 +118,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
 
   if (isLabel) {
     return (
-      <div className="px-0.5 text-[9.5px] uppercase tracking-[0.18em] text-faint">{d.title}</div>
+      <div className="text-faint px-0.5 text-[9.5px] tracking-[0.18em] uppercase">{d.title}</div>
     )
   }
 
@@ -131,12 +137,16 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
         <motion.div
           initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
+          transition={{
+            duration: 0.2,
+            delay: Math.min((d.index ?? 0) * 0.018, 0.4),
+            ease: [0.22, 0.7, 0.3, 1],
+          }}
           style={{ width: w, height: (d.h as number) ?? 44 }}
           role="button"
           tabIndex={0}
           aria-label={`${d.title} input group`}
-          className={`relative cursor-pointer rounded-[4px] border border-dashed bg-panel ${wide ? 'flex items-center justify-between gap-3 px-3' : 'px-2 py-1'} ${tone}`}
+          className={`bg-panel relative cursor-pointer rounded-[4px] border border-dashed ${wide ? 'flex items-center justify-between gap-3 px-3' : 'px-2 py-1'} ${tone}`}
           title={`${d.title} · ${access ?? ''}${d.sub ? ' · ' + d.sub : ''}`}
           onContextMenu={(e) => e.stopPropagation()}
         >
@@ -145,7 +155,11 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           <Handle type="target" position={Position.Top} id="t" />
           <Handle type="source" position={Position.Bottom} id="b" />
           <div className="min-w-0 truncate text-[10.5px] leading-tight">{d.title}</div>
-          <div className={`truncate text-[8.5px] uppercase tracking-[0.08em] opacity-80 ${wide ? 'shrink-0' : 'mt-0.5'}`}>{d.sub}</div>
+          <div
+            className={`truncate text-[8.5px] tracking-[0.08em] uppercase opacity-80 ${wide ? 'shrink-0' : 'mt-0.5'}`}
+          >
+            {d.sub}
+          </div>
         </motion.div>
       </CardMenu>
     )
@@ -158,7 +172,11 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
         <motion.div
           initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.2, delay: Math.min((d.index ?? 0) * 0.018, 0.4), ease: [0.22, 0.7, 0.3, 1] }}
+          transition={{
+            duration: 0.2,
+            delay: Math.min((d.index ?? 0) * 0.018, 0.4),
+            ease: [0.22, 0.7, 0.3, 1],
+          }}
           style={{ width: (d.w as number) ?? 32, height: (d.h as number) ?? 32 }}
           className={`relative ${clickable ? 'cursor-pointer' : ''}`}
           title={d.title}
@@ -173,7 +191,9 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           <div
             className={`flex size-full items-center justify-center rounded-full border border-dashed transition-colors ${tone.hover} ${tone.idle}`}
           >
-            <span className={`text-[10px] font-semibold leading-none tabular-nums ${tone.text}`}>{String(d.badge || '↩')}</span>
+            <span className={`text-[10px] leading-none font-semibold tabular-nums ${tone.text}`}>
+              {String(d.badge || '↩')}
+            </span>
           </div>
         </motion.div>
       </CardMenu>
@@ -185,100 +205,114 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
       <motion.div
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.24, delay: Math.min((d.index ?? 0) * 0.018, 0.5), ease: [0.22, 0.7, 0.3, 1] }}
+        transition={{
+          duration: 0.24,
+          delay: Math.min((d.index ?? 0) * 0.018, 0.5),
+          ease: [0.22, 0.7, 0.3, 1],
+        }}
         style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
         title={d.full}
         onContextMenu={(e) => e.stopPropagation()}
         className={[
-        'relative flex flex-col justify-center overflow-hidden rounded-[6px] border px-2.5 py-2 text-ink',
-        isBanner
-          ? 'border-dashed border-acc/35 bg-transparent text-acc/90'
-          : isExit
-            ? 'border-dashed border-warn/45 bg-warn/[0.04]'
-            : isRoot
-              ? 'border-line2 bg-panel2'
-              : 'border-line bg-panel',
-        clickable ? 'cursor-pointer transition-colors hover:border-acc/60 hover:bg-panel2' : '',
-      ].join(' ')}
-    >
-      <Handle type="target" position={Position.Top} id="t" />
-      <Handle type="source" position={Position.Bottom} id="b" />
-      <Handle type="target" position={Position.Bottom} id="bi" style={{ left: '75%' }} />
-      <Handle type="target" position={Position.Left} id="l" />
-      <Handle type="source" position={Position.Right} id="r" />
-      <Handle type="target" position={Position.Right} id="ri" style={{ top: "50%" }} />
-      <Handle type="source" position={Position.Left} id="lo" style={{ top: "50%" }} />
+          'relative flex flex-col justify-center overflow-hidden rounded-[6px] border px-2.5 py-2 text-ink',
+          isBanner
+            ? 'border-dashed border-acc/35 bg-transparent text-acc/90'
+            : isExit
+              ? 'border-dashed border-warn/45 bg-warn/[0.04]'
+              : isRoot
+                ? 'border-line2 bg-panel2'
+                : 'border-line bg-panel',
+          clickable ? 'cursor-pointer transition-colors hover:border-acc/60 hover:bg-panel2' : '',
+        ].join(' ')}
+      >
+        <Handle type="target" position={Position.Top} id="t" />
+        <Handle type="source" position={Position.Bottom} id="b" />
+        <Handle type="target" position={Position.Bottom} id="bi" style={{ left: '75%' }} />
+        <Handle type="target" position={Position.Left} id="l" />
+        <Handle type="source" position={Position.Right} id="r" />
+        <Handle type="target" position={Position.Right} id="ri" style={{ top: '50%' }} />
+        <Handle type="source" position={Position.Left} id="lo" style={{ top: '50%' }} />
 
-      <span className="absolute -left-[19px] top-[13px] size-[7px] rounded-full border border-line2 bg-canvas" />
+        <span className="border-line2 bg-canvas absolute top-[13px] -left-[19px] size-[7px] rounded-full border" />
 
-      <div className="flex items-center gap-1.5">
-        {d.index !== undefined && d.index > 0 && !isBanner && (
-          <span className="rounded-[3px] border border-line px-1 text-[10px] text-faint">{d.index}</span>
-        )}
-        {isRoute && d.badge && (
-          <span className={`text-[10px] font-semibold tracking-[0.08em] ${methodTone[d.badge] ?? 'text-mut'}`}>
-            {d.badge}
-          </span>
-        )}
-        <span className={`min-w-0 flex-1 truncate ${isBanner ? 'text-[11px] tracking-[0.06em]' : 'text-[12px]'}`}>
-          {d.kind === 'loop' && <span className="mr-1 text-warn">↺</span>}
-          {d.title}
-        </span>
-        {d.badge && !isRoute && !isExit && (
-          <span className="shrink-0 rounded-[3px] border border-line px-1 text-[9.5px] uppercase tracking-[0.1em] text-mut">
-            {d.badge}
-          </span>
-        )}
-        {clickable && (
-          <span
-            data-open
-            role="link"
-            aria-label={`open ${d.title}`}
-            className="shrink-0 cursor-pointer rounded-[3px] border border-transparent px-1 py-0.5 text-[10px] text-faint transition-colors hover:border-line hover:bg-panel2 hover:text-acc"
-            title="open this function"
-          >
-            open ›
-          </span>
-        )}
-      </div>
-
-      {(d.sub || (d.tags && d.tags.length > 0) || isStage) && (
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {d.sub && (
-            <span className="min-w-0 flex-1 truncate text-[10.5px] text-mut" title={d.sub}>
-              {d.sub}
+        <div className="flex items-center gap-1.5">
+          {d.index !== undefined && d.index > 0 && !isBanner && (
+            <span className="border-line text-faint rounded-[3px] border px-1 text-[10px]">
+              {d.index}
             </span>
           )}
-          {(d.tags ?? []).map((t) => (
-            <Tag key={t} t={t} />
-          ))}
-          {d.ms && <span className="ml-auto shrink-0 tabular-nums text-[10.5px] text-info">{d.ms}</span>}
-          {isStage && !d.badge && <span className="text-[9.5px] text-faint">{kindBadge[d.kind]}</span>}
-        </div>
-      )}
-
-      {typeof d.share === 'number' && d.share > 0 && (
-        <span className="pointer-events-none absolute inset-x-[7px] bottom-[5px] h-[2px] rounded-full bg-line">
-          <span
-            className="block h-full rounded-full bg-acc/70"
-            style={{ width: `${Math.min(100, Math.max(2, Math.round(d.share * 100)))}%` }}
-          />
-        </span>
-      )}
-
-      {isExit && (
-        <div className="mt-1 flex items-center gap-1.5 self-start">
-          <span className="text-[10px] text-mut">returns here</span>
-          {d.rk && <Tag t={d.rk} />}
-          {d.badge && (!d.rk || d.badge !== 'exits') && (
+          {isRoute && d.badge && (
             <span
-              className={`rounded-[3px] border px-1 text-[10px] leading-[14px] ${statusBadgeTone[statusTone(d.badge as string | undefined)]}`}
+              className={`text-[10px] font-semibold tracking-[0.08em] ${methodTone[d.badge] ?? 'text-mut'}`}
             >
               {d.badge}
             </span>
           )}
+          <span
+            className={`min-w-0 flex-1 truncate ${isBanner ? 'text-[11px] tracking-[0.06em]' : 'text-[12px]'}`}
+          >
+            {d.kind === 'loop' && <span className="text-warn mr-1">↺</span>}
+            {d.title}
+          </span>
+          {d.badge && !isRoute && !isExit && (
+            <span className="border-line text-mut shrink-0 rounded-[3px] border px-1 text-[9.5px] tracking-[0.1em] uppercase">
+              {d.badge}
+            </span>
+          )}
+          {clickable && (
+            <span
+              data-open
+              role="link"
+              aria-label={`open ${d.title}`}
+              className="text-faint hover:border-line hover:bg-panel2 hover:text-acc shrink-0 cursor-pointer rounded-[3px] border border-transparent px-1 py-0.5 text-[10px] transition-colors"
+              title="open this function"
+            >
+              open ›
+            </span>
+          )}
         </div>
-      )}
+
+        {(d.sub || (d.tags && d.tags.length > 0) || isStage) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {d.sub && (
+              <span className="text-mut min-w-0 flex-1 truncate text-[10.5px]" title={d.sub}>
+                {d.sub}
+              </span>
+            )}
+            {(d.tags ?? []).map((t) => (
+              <Tag key={t} t={t} />
+            ))}
+            {d.ms && (
+              <span className="text-info ml-auto shrink-0 text-[10.5px] tabular-nums">{d.ms}</span>
+            )}
+            {isStage && !d.badge && (
+              <span className="text-faint text-[9.5px]">{kindBadge[d.kind]}</span>
+            )}
+          </div>
+        )}
+
+        {typeof d.share === 'number' && d.share > 0 && (
+          <span className="bg-line pointer-events-none absolute inset-x-[7px] bottom-[5px] h-[2px] rounded-full">
+            <span
+              className="bg-acc/70 block h-full rounded-full"
+              style={{ width: `${Math.min(100, Math.max(2, Math.round(d.share * 100)))}%` }}
+            />
+          </span>
+        )}
+
+        {isExit && (
+          <div className="mt-1 flex items-center gap-1.5 self-start">
+            <span className="text-mut text-[10px]">returns here</span>
+            {d.rk && <Tag t={d.rk} />}
+            {d.badge && (!d.rk || d.badge !== 'exits') && (
+              <span
+                className={`rounded-[3px] border px-1 text-[10px] leading-[14px] ${statusBadgeTone[statusTone(d.badge as string | undefined)]}`}
+              >
+                {d.badge}
+              </span>
+            )}
+          </div>
+        )}
       </motion.div>
     </CardMenu>
   )

@@ -22,8 +22,7 @@ export async function loadData(): Promise<Data> {
 
 export const segments = (path: string): string[] => path.split('/').filter(Boolean)
 
-export const groupOf = (r: Route, depth = 2): string =>
-  segments(r.p).slice(0, depth).join('/')
+export const groupOf = (r: Route, depth = 2): string => segments(r.p).slice(0, depth).join('/')
 
 export function stageOf(r: Route, i: number): Stage | undefined {
   return r.ch[i]

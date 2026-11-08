@@ -10,18 +10,29 @@ import {
   useSearch,
 } from '@tanstack/react-router'
 import { Code2, Search } from 'lucide-react'
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+
 import { GoSource } from './components/GoSource'
 import { Badge } from './components/ui/badge'
 import { Button } from './components/ui/button'
 import { SearchDialog } from './components/ui/command'
 import { Segmented } from './components/ui/segmented'
 import { Sheet } from './components/ui/sheet'
+import { buildFlowScene } from './graph/flowscene'
 import { SceneCanvas } from './graph/SceneCanvas'
 import { buildPipelineScene, buildRouterScene, externalCalls, type Scene } from './graph/scenes'
-import { buildFlowScene } from './graph/flowscene'
-import { DocPanel, Inputs } from './panes/DocPanel'
-import { flowOf, fnHref, frameName, loadData, msOf, routeHref, stageHref, tagLabel, timingOf, touchTags } from './lib/data'
+import {
+  flowOf,
+  fnHref,
+  frameName,
+  loadData,
+  msOf,
+  routeHref,
+  stageHref,
+  tagLabel,
+  timingOf,
+  touchTags,
+} from './lib/data'
 import { goto } from './lib/nav'
 import type {
   Call,
@@ -35,6 +46,7 @@ import type {
   StreamMessage,
   SynType,
 } from './lib/types'
+import { DocPanel, Inputs } from './panes/DocPanel'
 
 /* ---------- data ---------- */
 
@@ -52,7 +64,13 @@ type Crumb = { label: string; href?: string }
 function useCrumbs(): Crumb[] {
   const data = useData()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const search = useSearch({ strict: false }) as { k?: string; i?: string; t?: string; ri?: string; si?: string }
+  const search = useSearch({ strict: false }) as {
+    k?: string
+    i?: string
+    t?: string
+    ri?: string
+    si?: string
+  }
   const parts = pathname.split('/').filter(Boolean)
   const crumbs: Crumb[] = [{ label: data.repo, href: '/' }]
 
@@ -64,14 +82,16 @@ function useCrumbs(): Crumb[] {
     crumbs.push({ label: `${r.m} ${r.p}`, href: routeHref(ri) })
     if (si !== undefined) {
       const st = r.ch[si]
-      const same = st && (st.n === skipStage || Boolean(skipStage && skipStage.endsWith('.' + st.n)))
+      const same =
+        st && (st.n === skipStage || Boolean(skipStage && skipStage.endsWith('.' + st.n)))
       if (st && !same) {
         const fk = (st.fk ?? '').split('|')
         const self = fk.length >= 3 ? data.types?.[`${fk[0]}|${fk[1]}`] : undefined
         const origin = `&ri=${ri}&si=${si}`
         if (self) {
           const impl = self.impls?.length === 1 ? data.types?.[self.impls[0]] : undefined
-          if (impl) crumbs.push({ label: impl.n, href: `/t?k=${encodeURIComponent(impl.key)}${origin}` })
+          if (impl)
+            crumbs.push({ label: impl.n, href: `/t?k=${encodeURIComponent(impl.key)}${origin}` })
           crumbs.push({ label: self.n, href: `/t?k=${encodeURIComponent(self.key)}${origin}` })
         }
         crumbs.push({ label: st.n, href: stageHref(ri, si) })
@@ -99,8 +119,13 @@ function useCrumbs(): Crumb[] {
     if (Number.isFinite(ri) && data.routes[ri]) {
       routeChain(ri, Number.isFinite(si) ? si : undefined)
     }
-    if (iface) crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
-    if (self) crumbs.push({ label: self.n, href: `/t?k=${encodeURIComponent(self.key)}${search.i ? `&i=${encodeURIComponent(search.i)}` : ''}${origin}` })
+    if (iface)
+      crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
+    if (self)
+      crumbs.push({
+        label: self.n,
+        href: `/t?k=${encodeURIComponent(self.key)}${search.i ? `&i=${encodeURIComponent(search.i)}` : ''}${origin}`,
+      })
   }
 
   if (parts[0] === 'rpc') {
@@ -125,8 +150,13 @@ function useCrumbs(): Crumb[] {
     if (Number.isFinite(ri) && data.routes[ri]) {
       routeChain(ri, Number.isFinite(si) ? si : undefined, f?.n)
     }
-    if (iface) crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
-    if (st) crumbs.push({ label: st.n, href: `/t?k=${encodeURIComponent(st.key)}${iface ? `&i=${encodeURIComponent(iface.key)}` : ''}${origin}` })
+    if (iface)
+      crumbs.push({ label: iface.n, href: `/t?k=${encodeURIComponent(iface.key)}${origin}` })
+    if (st)
+      crumbs.push({
+        label: st.n,
+        href: `/t?k=${encodeURIComponent(st.key)}${iface ? `&i=${encodeURIComponent(iface.key)}` : ''}${origin}`,
+      })
     if (f && crumbs[crumbs.length - 1]?.label !== f.n) crumbs.push({ label: f.n, href: '#' })
   }
 
@@ -139,7 +169,16 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
   const data = useData()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const parts = pathname.split('/').filter(Boolean)
-  const level = parts[0] === 'rpc' ? '' : parts[0] === 'f' ? 'code' : parts[0] === 'r' ? (parts[2] === 's' ? 'step' : 'route') : 'router'
+  const level =
+    parts[0] === 'rpc'
+      ? ''
+      : parts[0] === 'f'
+        ? 'code'
+        : parts[0] === 'r'
+          ? parts[2] === 's'
+            ? 'step'
+            : 'route'
+          : 'router'
   const ri = parts[0] === 'r' ? Number(parts[1]) : -1
   const go = (lv: string) => {
     if (lv === 'router') goto('/')
@@ -152,29 +191,42 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
   }
 
   return (
-    <header className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line px-4 py-2">
+    <header className="border-line flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-2">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] uppercase tracking-[0.18em] text-faint">route synoptic</span>
-        <span className="text-[13px] text-ink">{data.repo}</span>
+        <span className="text-faint text-[10px] tracking-[0.18em] uppercase">route synoptic</span>
+        <span className="text-ink text-[13px]">{data.repo}</span>
       </div>
-      <div className="hidden gap-x-3 text-[10.5px] text-mut sm:flex">
-        <span><b className="font-semibold text-ink">{data.stats.routes}</b> routes</span>
+      <div className="text-mut hidden gap-x-3 text-[10.5px] sm:flex">
+        <span>
+          <b className="text-ink font-semibold">{data.stats.routes}</b> routes
+        </span>
         {(data.stats.streams ?? 0) > 0 && (
-          <span><b className="font-semibold text-ink">{data.stats.streams}</b> stream{data.stats.streams === 1 ? '' : 's'}</span>
+          <span>
+            <b className="text-ink font-semibold">{data.stats.streams}</b> stream
+            {data.stats.streams === 1 ? '' : 's'}
+          </span>
         )}
         {(data.stats.services ?? 0) > 0 && (
           <span>
-            <b className="font-semibold text-ink">{data.stats.services}</b> rpc ·{' '}
-            <b className="font-semibold text-ink">{data.stats.rpcs}</b> {data.stats.rpcs === 1 ? 'method' : 'methods'}
+            <b className="text-ink font-semibold">{data.stats.services}</b> rpc ·{' '}
+            <b className="text-ink font-semibold">{data.stats.rpcs}</b>{' '}
+            {data.stats.rpcs === 1 ? 'method' : 'methods'}
           </span>
         )}
-        <span><b className="font-semibold text-ink">{data.stats.middleware}</b> middleware</span>
-        <span><b className="font-semibold text-ink">{data.stats.documented}</b>/{data.stats.routes} documented</span>
-        <span><b className="font-semibold text-ink">{data.stats.funcs}</b> flows</span>
+        <span>
+          <b className="text-ink font-semibold">{data.stats.middleware}</b> middleware
+        </span>
+        <span>
+          <b className="text-ink font-semibold">{data.stats.documented}</b>/{data.stats.routes}{' '}
+          documented
+        </span>
+        <span>
+          <b className="text-ink font-semibold">{data.stats.funcs}</b> flows
+        </span>
       </div>
       <div className="ml-auto flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1.5">
-          <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">level</span>
+          <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">level</span>
           <Segmented
             value={level}
             onChange={go}
@@ -187,13 +239,19 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
           />
         </div>
         {(data.stats.services ?? 0) > 0 && (
-          <Button variant={parts[0] === 'rpc' ? 'default' : 'ghost'} size="sm" onClick={() => goto('/rpc')}>
+          <Button
+            variant={parts[0] === 'rpc' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => goto('/rpc')}
+          >
             rpc <span className="text-[10px] opacity-70">{data.stats.rpcs}</span>
           </Button>
         )}
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
-          <kbd className="ml-1 rounded-[3px] border border-line px-1 text-[9.5px] text-faint">⌘K</kbd>
+          <kbd className="border-line text-faint ml-1 rounded-[3px] border px-1 text-[9.5px]">
+            ⌘K
+          </kbd>
         </Button>
       </div>
     </header>
@@ -203,15 +261,23 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
 function Crumbs() {
   const crumbs = useCrumbs()
   return (
-    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-line px-4 py-1.5 text-[11px] text-mut">
-      <Button variant="ghost" size="sm" className="mr-1 h-5 px-1.5" onClick={() => window.history.back()}>
+    <div className="border-line text-mut flex flex-wrap items-center gap-x-1.5 gap-y-1 border-b px-4 py-1.5 text-[11px]">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mr-1 h-5 px-1.5"
+        onClick={() => window.history.back()}
+      >
         back
       </Button>
       {crumbs.map((c, i) => (
         <span key={i} className="flex items-center gap-1.5">
           {i > 0 && <span className="text-faint">›</span>}
           {c.href && i < crumbs.length - 1 ? (
-            <button className="rounded-[3px] px-1 hover:bg-panel hover:text-ink" onClick={() => goto(c.href!)}>
+            <button
+              className="hover:bg-panel hover:text-ink rounded-[3px] px-1"
+              onClick={() => goto(c.href!)}
+            >
               {c.label}
             </button>
           ) : (
@@ -278,13 +344,13 @@ function Shell() {
   }, [searchOpen])
 
   return (
-    <div className="flex h-full flex-col bg-canvas">
+    <div className="bg-canvas flex h-full flex-col">
       <Topbar onSearch={() => setSearchOpen(true)} />
       <Crumbs />
       <div className="relative min-h-0 flex-1">
         <Outlet />
       </div>
-      <div className="pointer-events-none absolute bottom-2 left-4 text-[10px] text-faint">
+      <div className="text-faint pointer-events-none absolute bottom-2 left-4 text-[10px]">
         click any box to open it · right-click for actions · esc goes back · ⌘K searches
       </div>
       {toast && (
@@ -293,7 +359,9 @@ function Shell() {
           role="status"
           aria-live="polite"
           className={`toast-in pointer-events-none fixed inset-x-0 bottom-9 z-[70] mx-auto w-fit rounded-[5px] border px-3 py-1.5 text-[11px] shadow-[0_12px_32px_-12px_rgba(0,0,0,0.9)] ${
-            toast.tone === 'bad' ? 'border-bad/45 bg-bad/10 text-bad' : 'border-line bg-panel2 text-ink'
+            toast.tone === 'bad'
+              ? 'border-bad/45 bg-bad/10 text-bad'
+              : 'border-line bg-panel2 text-ink'
           }`}
         >
           {toast.text}
@@ -316,13 +384,18 @@ function Root() {
 
   if (error) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-[12px] text-bad">
-        {error} — run the generator with <code className="mx-1 text-ink">-json out/synoptic.json</code>
+      <div className="text-bad flex h-full items-center justify-center p-8 text-[12px]">
+        {error} — run the generator with{' '}
+        <code className="text-ink mx-1">-json out/synoptic.json</code>
       </div>
     )
   }
   if (!data) {
-    return <div className="flex h-full items-center justify-center text-[12px] text-faint">reading the module…</div>
+    return (
+      <div className="text-faint flex h-full items-center justify-center text-[12px]">
+        reading the module…
+      </div>
+    )
   }
 
   return (
@@ -354,10 +427,10 @@ function ScopeCard({
   sourceLabel?: string
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-4 gap-y-1 border-b border-line bg-panel/40 px-4 py-2">
+    <div className="border-line bg-panel/40 flex flex-wrap items-start gap-x-4 gap-y-1 border-b px-4 py-2">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="truncate text-[14px] text-ink">{title}</span>
+          <span className="text-ink truncate text-[14px]">{title}</span>
           {badge && <Badge variant="accent">{badge}</Badge>}
           {(tags ?? []).map((t) => (
             <Badge key={t} variant={t === 'db' ? 'warn' : t === 'cache' ? 'info' : 'default'}>
@@ -365,9 +438,9 @@ function ScopeCard({
             </Badge>
           ))}
         </div>
-        {meta && <div className="mt-0.5 truncate text-[10.5px] text-faint">{meta}</div>}
-        {doc && <p className="mt-1 line-clamp-2 text-[11.5px] leading-[1.5] text-ink/80">{doc}</p>}
-        {note && <p className="mt-1 text-[11px] italic leading-[1.5] text-faint">{note}</p>}
+        {meta && <div className="text-faint mt-0.5 truncate text-[10.5px]">{meta}</div>}
+        {doc && <p className="text-ink/80 mt-1 line-clamp-2 text-[11.5px] leading-[1.5]">{doc}</p>}
+        {note && <p className="text-faint mt-1 text-[11px] leading-[1.5] italic">{note}</p>}
       </div>
       {onSource && (
         <Button variant="outline" size="sm" onClick={onSource}>
@@ -378,7 +451,15 @@ function ScopeCard({
   )
 }
 
-function GraphPage({ scene, card, children }: { scene: Scene; card: React.ReactNode; children?: React.ReactNode }) {
+function GraphPage({
+  scene,
+  card,
+  children,
+}: {
+  scene: Scene
+  card: React.ReactNode
+  children?: React.ReactNode
+}) {
   return (
     <div className="flex h-full flex-col">
       {card}
@@ -386,7 +467,9 @@ function GraphPage({ scene, card, children }: { scene: Scene; card: React.ReactN
         <SceneCanvas scene={scene} />
       </div>
       {children && (
-        <div className="max-h-[44vh] shrink-0 overflow-auto border-t border-line bg-panel/30">{children}</div>
+        <div className="border-line bg-panel/30 max-h-[44vh] shrink-0 overflow-auto border-t">
+          {children}
+        </div>
       )}
     </div>
   )
@@ -396,14 +479,14 @@ function CallsList({ calls }: { calls?: Call[] }) {
   if (!calls || calls.length === 0) return null
   return (
     <div className="mt-4">
-      <div className="text-[9.5px] uppercase tracking-[0.14em] text-faint">calls in this repo</div>
+      <div className="text-faint text-[9.5px] tracking-[0.14em] uppercase">calls in this repo</div>
       <div className="mt-1.5 flex flex-col gap-1">
         {calls.map((c, i) => (
           <div key={i} className="flex items-baseline gap-2 text-[11.5px]">
             <span className="text-ink">{c.e}</span>
             {c.f && (
               <button
-                className="truncate text-[10px] text-faint hover:text-acc"
+                className="text-faint hover:text-acc truncate text-[10px]"
                 onClick={() => goto(`/f?k=${encodeURIComponent(c.k ?? '')}`)}
                 disabled={!c.k}
               >
@@ -411,7 +494,7 @@ function CallsList({ calls }: { calls?: Call[] }) {
                 {c.l ? `:${c.l}` : ''}
               </button>
             )}
-            {c.d && <span className="truncate text-[10px] text-faint">{c.d}</span>}
+            {c.d && <span className="text-faint truncate text-[10px]">{c.d}</span>}
           </div>
         ))}
       </div>
@@ -446,7 +529,7 @@ function DetailSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange} title={title} subtitle={subtitle}>
-      {doc && <p className="text-[12px] leading-[1.6] text-ink/85">{doc}</p>}
+      {doc && <p className="text-ink/85 text-[12px] leading-[1.6]">{doc}</p>}
       {stage && (
         <div className="mt-3 flex flex-wrap gap-1">
           <Badge>{stage.r ?? stage.k}</Badge>
@@ -462,12 +545,13 @@ function DetailSheet({
       {calls && calls.length > 0 && <CallsList calls={calls} />}
       {src ? (
         <div className="mt-4">
-          <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">source</div>
+          <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">source</div>
           <GoSource code={src} focus={focus} focusLines={focusLines} />
         </div>
       ) : (
-        <p className="mt-4 text-[11px] italic text-faint">
-          no body in this repo — the call is wired here, the code lives in {stage?.x ?? 'another module'}
+        <p className="text-faint mt-4 text-[11px] italic">
+          no body in this repo — the call is wired here, the code lives in{' '}
+          {stage?.x ?? 'another module'}
         </p>
       )}
     </Sheet>
@@ -480,18 +564,26 @@ function fieldsOf(m: StreamMessage): string {
   return names.slice(0, 4).join(', ') + (names.length > 4 ? ` +${names.length - 4}` : '')
 }
 
-function MessageCard({ m, event, onOpen }: { m: StreamMessage; event?: string; onOpen: () => void }) {
+function MessageCard({
+  m,
+  event,
+  onOpen,
+}: {
+  m: StreamMessage
+  event?: string
+  onOpen: () => void
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="block w-full rounded-[4px] border border-line bg-panel px-2 py-1.5 text-left transition-colors hover:border-line2 hover:bg-panel2"
+      className="border-line bg-panel hover:border-line2 hover:bg-panel2 block w-full rounded-[4px] border px-2 py-1.5 text-left transition-colors"
     >
       <div className="flex flex-wrap items-baseline gap-x-2">
-        <code className="text-[11px] leading-tight text-ink">{m.ev || m.n || frameName(m)}</code>
-        {m.t && <span className="break-all text-[9px] text-faint">{m.t}</span>}
+        <code className="text-ink text-[11px] leading-tight">{m.ev || m.n || frameName(m)}</code>
+        {m.t && <span className="text-faint text-[9px] break-all">{m.t}</span>}
       </div>
-      <div className="mt-0.5 break-words text-[9.5px] text-mut">
+      <div className="text-mut mt-0.5 text-[9.5px] break-words">
         {fieldsOf(m) || (event ? m.n : 'shape unresolved')}
       </div>
     </button>
@@ -510,46 +602,61 @@ function MessageSheet({
   onOpenChange: (v: boolean) => void
 }) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange} title={message ? frameName(message) : 'frame'} subtitle={event}>
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={message ? frameName(message) : 'frame'}
+      subtitle={event}
+    >
       {message && (
         <div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant={message.d === 'recv' ? 'info' : 'accent'}>{message.d === 'recv' ? 'received' : 'sent'}</Badge>
+            <Badge variant={message.d === 'recv' ? 'info' : 'accent'}>
+              {message.d === 'recv' ? 'received' : 'sent'}
+            </Badge>
             {message.t && <Badge>{message.t}</Badge>}
             {message.file && (
-              <span className="ml-auto text-[10px] text-faint">
+              <span className="text-faint ml-auto text-[10px]">
                 {message.file}:{message.l ?? 0}
               </span>
             )}
           </div>
           {message.n && message.n !== frameName(message) && (
-            <p className="mt-2 text-[10px] text-faint">name {message.n}</p>
+            <p className="text-faint mt-2 text-[10px]">name {message.n}</p>
           )}
           <div className="mt-4">
-            <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">fields</div>
+            <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">fields</div>
             {message.f?.length ? (
-              <div className="divide-y divide-line/40 border-y border-line/40">
+              <div className="divide-line/40 border-line/40 divide-y border-y">
                 {message.f.map((f) => (
                   <div key={f.n} className="flex flex-wrap items-baseline gap-x-2 py-1.5">
-                    <code className="text-[11px] text-ink">{f.n}</code>
-                    {f.t && <span className="text-[10px] text-mut">{f.t}</span>}
-                    {f.tg && <span className="text-[9.5px] text-faint">{f.tg}</span>}
-                    {f.rq && <span className="text-[9px] uppercase tracking-[0.1em] text-warn">required</span>}
+                    <code className="text-ink text-[11px]">{f.n}</code>
+                    {f.t && <span className="text-mut text-[10px]">{f.t}</span>}
+                    {f.tg && <span className="text-faint text-[9.5px]">{f.tg}</span>}
+                    {f.rq && (
+                      <span className="text-warn text-[9px] tracking-[0.1em] uppercase">
+                        required
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-[11px] italic text-faint">no fields resolved — only the source expression is known.</p>
+              <p className="text-faint text-[11px] italic">
+                no fields resolved — only the source expression is known.
+              </p>
             )}
           </div>
           {message.e && (
             <div className="mt-4">
-              <div className="mb-1 text-[9.5px] uppercase tracking-[0.14em] text-faint">expression</div>
-              <code className="block break-words text-[10.5px] text-mut">{message.e}</code>
+              <div className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">
+                expression
+              </div>
+              <code className="text-mut block text-[10.5px] break-words">{message.e}</code>
             </div>
           )}
           {message.ex && (
-            <pre className="mt-3 overflow-x-auto rounded-[4px] bg-canvas/70 p-2 text-[10px] leading-relaxed text-mut">
+            <pre className="bg-canvas/70 text-mut mt-3 overflow-x-auto rounded-[4px] p-2 text-[10px] leading-relaxed">
               {message.ex}
             </pre>
           )}
@@ -573,24 +680,26 @@ function ExternalCalls({ items, onFn }: { items: ExtCall[]; onFn?: (key: string)
             <Badge variant={group.g === 'db' ? 'warn' : group.g === 'cache' ? 'accent' : 'info'}>
               {tagLabel[group.g] ?? group.g}
             </Badge>
-            <span className="text-[10px] text-faint">{group.items.length}</span>
+            <span className="text-faint text-[10px]">{group.items.length}</span>
           </div>
-          <div className="divide-y divide-line/40 border-y border-line/40">
+          <div className="divide-line/40 border-line/40 divide-y border-y">
             {group.items.map((x, i) => (
               <div key={`${x.g}:${x.n}:${x.f ?? ''}:${x.l ?? 0}:${i}`} className="py-1.5">
                 {x.fk && onFn ? (
                   <button
                     type="button"
                     onClick={() => onFn(x.fk!)}
-                    className="block break-words text-left font-mono text-[10.5px] leading-relaxed text-acc hover:underline"
+                    className="text-acc block text-left font-mono text-[10.5px] leading-relaxed break-words hover:underline"
                   >
                     {x.n}
                   </button>
                 ) : (
-                  <code className="block break-words font-mono text-[10.5px] leading-relaxed text-ink">{x.n}</code>
+                  <code className="text-ink block font-mono text-[10.5px] leading-relaxed break-words">
+                    {x.n}
+                  </code>
                 )}
                 {x.f && (
-                  <div className="mt-0.5 break-all font-mono text-[9px] text-faint">
+                  <div className="text-faint mt-0.5 font-mono text-[9px] break-all">
                     {x.f}
                     {x.l ? `:${x.l}` : ''}
                   </div>
@@ -617,16 +726,16 @@ function TraceRows({
 }) {
   const list = steps.slice(0, depth === 0 ? limit : 2)
   return (
-    <div className={depth === 0 ? 'space-y-1' : 'mt-1 space-y-1 border-l border-line/60 pl-3'}>
+    <div className={depth === 0 ? 'space-y-1' : 'border-line/60 mt-1 space-y-1 border-l pl-3'}>
       {list.map((s, i) => {
         const branch = s.b?.length || s.e?.length
         return (
           <div key={`${depth}:${i}:${s.l ?? 0}:${s.t}`}>
             <div className="flex items-start gap-2">
-              <span className="mt-[1px] w-3 shrink-0 text-right font-mono text-[9px] text-faint">
+              <span className="text-faint mt-[1px] w-3 shrink-0 text-right font-mono text-[9px]">
                 {depth === 0 ? i + 1 : ''}
               </span>
-              <span className="mt-[1px] w-7 shrink-0 text-[8px] uppercase tracking-[0.08em] text-faint">
+              <span className="text-faint mt-[1px] w-7 shrink-0 text-[8px] tracking-[0.08em] uppercase">
                 {s.k === 'ret' ? 'return' : s.k}
               </span>
               <div className="min-w-0">
@@ -635,13 +744,13 @@ function TraceRows({
                     <button
                       type="button"
                       onClick={() => onFn(s.fk!)}
-                      className={`break-words text-left font-mono text-[10.5px] leading-relaxed text-acc hover:underline`}
+                      className={`text-acc text-left font-mono text-[10.5px] leading-relaxed break-words hover:underline`}
                     >
                       {s.t}
                     </button>
                   ) : (
                     <div
-                      className={`break-words font-mono text-[10.5px] leading-relaxed ${
+                      className={`font-mono text-[10.5px] leading-relaxed break-words ${
                         s.k === 'ret' || s.k === 'exit' ? 'text-warn' : 'text-ink'
                       }`}
                     >
@@ -650,7 +759,7 @@ function TraceRows({
                   )}
                   {(s.k === 'ret' || s.k === 'exit') && s.rk ? (
                     <span
-                      className={`shrink-0 rounded border px-1 text-[8px] uppercase tracking-[0.08em] ${
+                      className={`shrink-0 rounded border px-1 text-[8px] tracking-[0.08em] uppercase ${
                         s.rk === 'error'
                           ? 'border-bad/40 text-bad'
                           : s.rk === 'nil'
@@ -663,15 +772,17 @@ function TraceRows({
                   ) : null}
                 </div>
                 {(s.cd || s.s) && (
-                  <div className="break-words font-mono text-[9px] text-faint">{s.cd || s.s}</div>
+                  <div className="text-faint font-mono text-[9px] break-words">{s.cd || s.s}</div>
                 )}
-                {s.l ? <div className="font-mono text-[8.5px] text-faint">:{s.l}</div> : null}
+                {s.l ? <div className="text-faint font-mono text-[8.5px]">:{s.l}</div> : null}
               </div>
             </div>
             {branch && s.b?.length ? <TraceRows steps={s.b} depth={depth + 1} onFn={onFn} /> : null}
             {branch && s.e?.length ? (
               <>
-                <div className="mt-1 pl-5 text-[9px] uppercase tracking-[0.12em] text-faint">else</div>
+                <div className="text-faint mt-1 pl-5 text-[9px] tracking-[0.12em] uppercase">
+                  else
+                </div>
                 <TraceRows steps={s.e} depth={depth + 1} onFn={onFn} />
               </>
             ) : null}
@@ -679,7 +790,7 @@ function TraceRows({
         )
       })}
       {steps.length > list.length && depth === 0 ? (
-        <div className="pl-5 text-[9.5px] italic text-faint">
+        <div className="text-faint pl-5 text-[9.5px] italic">
           +{steps.length - list.length} more steps in the full flow
         </div>
       ) : null}
@@ -689,27 +800,29 @@ function TraceRows({
 
 function EffectRows({ items, onFn }: { items: Effect[]; onFn?: (key: string) => void }) {
   return (
-    <div className="divide-y divide-line/40 border-y border-line/40">
+    <div className="divide-line/40 border-line/40 divide-y border-y">
       {items.map((x, i) => (
         <div key={`${x.k}:${x.n}:${x.l ?? 0}:${i}`} className="flex items-start gap-2 py-1.5">
-          <Badge variant={x.k === 'publish' ? 'accent' : x.k === 'write' ? 'warn' : 'info'}>{x.k}</Badge>
+          <Badge variant={x.k === 'publish' ? 'accent' : x.k === 'write' ? 'warn' : 'info'}>
+            {x.k}
+          </Badge>
           <div className="min-w-0 flex-1">
             {x.fk && onFn ? (
               <button
                 type="button"
                 onClick={() => onFn(x.fk!)}
-                className="break-words text-left font-mono text-[10.5px] text-acc hover:underline"
+                className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
               >
                 {x.n}
               </button>
             ) : (
-              <code className="break-words font-mono text-[10.5px] text-ink">{x.n}</code>
+              <code className="text-ink font-mono text-[10.5px] break-words">{x.n}</code>
             )}
             {x.s && x.s !== x.n ? (
-              <div className="break-words font-mono text-[9px] text-faint">{x.s}</div>
+              <div className="text-faint font-mono text-[9px] break-words">{x.s}</div>
             ) : null}
           </div>
-          {x.l ? <span className="font-mono text-[8.5px] text-faint">:{x.l}</span> : null}
+          {x.l ? <span className="text-faint font-mono text-[8.5px]">:{x.l}</span> : null}
         </div>
       ))}
     </div>
@@ -729,24 +842,31 @@ function TriggeredBy({
   if (!origins.length) {
     return isSse ? (
       <div className="mt-4">
-        <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">triggered by</div>
-        <p className="text-[10.5px] italic text-faint">no in-repo publisher resolved for this event.</p>
+        <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">
+          triggered by
+        </div>
+        <p className="text-faint text-[10.5px] italic">
+          no in-repo publisher resolved for this event.
+        </p>
       </div>
     ) : null
   }
   return (
     <div className="mt-4">
-      <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">triggered by</div>
-      <div className="divide-y divide-line/40 border-y border-line/40">
+      <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">triggered by</div>
+      <div className="divide-line/40 border-line/40 divide-y border-y">
         {origins.map((o, i) => (
-          <div key={`${o.n}:${o.f ?? ''}:${o.l ?? 0}:${i}`} className="flex items-start gap-2 py-1.5">
+          <div
+            key={`${o.n}:${o.f ?? ''}:${o.l ?? 0}:${i}`}
+            className="flex items-start gap-2 py-1.5"
+          >
             <Badge variant={o.k === 'route' ? 'info' : 'plain'}>{o.k ?? 'background'}</Badge>
             <div className="min-w-0 flex-1">
               {o.k === 'route' && o.p ? (
                 <button
                   type="button"
                   onClick={() => goto(routeHref(o.ri ?? 0))}
-                  className="break-words text-left font-mono text-[10.5px] text-acc hover:underline"
+                  className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
                 >
                   {o.m} {o.p}
                 </button>
@@ -754,25 +874,25 @@ function TriggeredBy({
                 <button
                   type="button"
                   onClick={() => onFn(o.fk!)}
-                  className="break-words text-left font-mono text-[10.5px] text-acc hover:underline"
+                  className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
                 >
                   {o.n}
                 </button>
               ) : (
-                <div className="break-words font-mono text-[10.5px] text-ink">{o.n}</div>
+                <div className="text-ink font-mono text-[10.5px] break-words">{o.n}</div>
               )}
               {o.k === 'route' && o.fk && onFn ? (
                 <button
                   type="button"
                   onClick={() => onFn(o.fk!)}
-                  className="mt-0.5 font-mono text-[9px] text-acc hover:underline"
+                  className="text-acc mt-0.5 font-mono text-[9px] hover:underline"
                 >
                   method ›
                 </button>
               ) : null}
-              {o.via ? <div className="text-[9px] text-faint">via {o.via}</div> : null}
+              {o.via ? <div className="text-faint text-[9px]">via {o.via}</div> : null}
               {o.f ? (
-                <div className="break-all font-mono text-[9px] text-faint">
+                <div className="text-faint font-mono text-[9px] break-all">
                   {o.f}
                   {o.l ? `:${o.l}` : ''}
                   {o.c && o.c > 1 ? ` · ${o.c} calls` : ''}
@@ -786,7 +906,15 @@ function TriggeredBy({
   )
 }
 
-function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string, FuncFlow>; ri: number }) {
+function StreamBoard({
+  route,
+  flows,
+  ri,
+}: {
+  route: Route
+  flows?: Record<string, FuncFlow>
+  ri: number
+}) {
   const st = route.st
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
@@ -798,18 +926,25 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
   }, [route.p, route.m])
 
   const isSse = st?.k === 'sse'
-  const recv = st?.recv ?? []
-  const send = st?.send ?? []
+  const recv = st?.recv ?? EMPTY_MESSAGES
+  const send = st?.send ?? EMPTY_MESSAGES
   const ext = externalCalls(route, flows)
   const known = useMemo(() => {
     const names = [
       ...new Set(
-        [...(st?.events ?? []), ...recv.map((m) => m.ev ?? ''), ...send.map((m) => m.ev ?? '')].filter(Boolean),
+        [
+          ...(st?.events ?? []),
+          ...recv.map((m) => m.ev ?? ''),
+          ...send.map((m) => m.ev ?? ''),
+        ].filter(Boolean),
       ),
     ]
     return names.length || !isSse ? names : ['event stream']
   }, [isSse, st, recv, send])
-  const eventOf = (m: StreamMessage) => m.ev || (m.n && known.includes(m.n) ? m.n : '')
+  const eventOf = useCallback(
+    (m: StreamMessage) => m.ev || (m.n && known.includes(m.n) ? m.n : ''),
+    [known],
+  )
   const uniq = (list: StreamMessage[]) => [
     ...new Map(list.map((m) => [`${m.t}|${m.n}|${m.ev}`, m])).values(),
   ]
@@ -820,7 +955,7 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
         inbound: recv.filter((m) => eventOf(m) === event),
         outbound: isSse ? send : send.filter((m) => eventOf(m) === event),
       })),
-    [isSse, known, recv, send],
+    [eventOf, isSse, known, recv, send],
   )
   const preamble = uniq(recv.filter((m) => !eventOf(m) && !/^[A-Z]$/.test(m.t ?? '')))
   const unmapped = uniq(send.filter((m) => !eventOf(m)))
@@ -839,7 +974,8 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
       .includes(q)
   }
   const filtered = exchanges.filter(matches)
-  const defaultKey = exchanges[0]?.event ?? (preamble.length ? '__preamble' : unmapped.length ? '__unmapped' : '')
+  const defaultKey =
+    exchanges[0]?.event ?? (preamble.length ? '__preamble' : unmapped.length ? '__unmapped' : '')
   const validSelected =
     selected === '__preamble'
       ? preamble.length > 0
@@ -859,7 +995,9 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
     (x) => !effects.some((e) => e.l === x.l && (x.n === e.n || x.n.includes(e.n))),
   )
   const routeCalls = ext.filter((x) => !x.ev)
-  const firstFrame = exchange ? [...exchange.inbound, ...exchange.outbound].find((m) => m.file) : undefined
+  const firstFrame = exchange
+    ? [...exchange.inbound, ...exchange.outbound].find((m) => m.file)
+    : undefined
   const handlerStage = route.ch[route.ch.length - 1]
   const handlerHref = flowKey
     ? fnHref(flowKey, { ri, si: route.ch.length - 1 })
@@ -867,7 +1005,11 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
       ? fnHref(handlerStage.fk, { ri, si: route.ch.length - 1 })
       : undefined
   const openFn = (key: string) => goto(fnHref(key, { ri, si: Math.max(0, route.ch.length - 1) }))
-  const frameCount = exchange ? exchange.inbound.length + exchange.outbound.length : active === '__preamble' ? preamble.length : unmapped.length
+  const frameCount = exchange
+    ? exchange.inbound.length + exchange.outbound.length
+    : active === '__preamble'
+      ? preamble.length
+      : unmapped.length
 
   const listRows = (
     <>
@@ -876,14 +1018,18 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
           type="button"
           onClick={() => setSelected('__preamble')}
           className={`block w-full border-l-2 px-3 py-2 text-left transition-colors ${
-            active === '__preamble' ? 'border-acc bg-acc/10' : 'border-transparent hover:bg-panel2/60'
+            active === '__preamble'
+              ? 'border-acc bg-acc/10'
+              : 'hover:bg-panel2/60 border-transparent'
           }`}
         >
-          <div className="font-mono text-[11px] text-ink">preamble</div>
-          <div className="mt-0.5 text-[9.5px] text-faint">{preamble.length} frame{preamble.length === 1 ? '' : 's'} before the switch</div>
+          <div className="text-ink font-mono text-[11px]">preamble</div>
+          <div className="text-faint mt-0.5 text-[9.5px]">
+            {preamble.length} frame{preamble.length === 1 ? '' : 's'} before the switch
+          </div>
         </button>
       )}
-      {preamble.length > 0 && <div className="border-t border-line/50" />}
+      {preamble.length > 0 && <div className="border-line/50 border-t" />}
       {filtered.map((x) => {
         const calls = ext.filter((c) => c.ev === x.event).length
         return (
@@ -892,12 +1038,12 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
             type="button"
             onClick={() => setSelected(x.event)}
             className={`block w-full border-l-2 px-3 py-2 text-left transition-colors ${
-              active === x.event ? 'border-acc bg-acc/10' : 'border-transparent hover:bg-panel2/60'
+              active === x.event ? 'border-acc bg-acc/10' : 'hover:bg-panel2/60 border-transparent'
             }`}
           >
-            <div className="break-words font-mono text-[11px] text-ink">{x.event}</div>
+            <div className="text-ink font-mono text-[11px] break-words">{x.event}</div>
             {(!isSse || calls > 0) && (
-              <div className="mt-0.5 text-[9.5px] text-faint">
+              <div className="text-faint mt-0.5 text-[9.5px]">
                 {isSse ? '' : `${x.inbound.length} in · ${x.outbound.length} out`}
                 {calls > 0 ? `${isSse ? '' : ' · '}${calls} call${calls === 1 ? '' : 's'}` : ''}
               </div>
@@ -905,43 +1051,53 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
           </button>
         )
       })}
-      {unmapped.length > 0 && <div className="border-t border-line/50" />}
+      {unmapped.length > 0 && <div className="border-line/50 border-t" />}
       {unmapped.length > 0 && (
         <button
           type="button"
           onClick={() => setSelected('__unmapped')}
           className={`block w-full border-l-2 px-3 py-2 text-left transition-colors ${
-            active === '__unmapped' ? 'border-acc bg-acc/10' : 'border-transparent hover:bg-panel2/60'
+            active === '__unmapped'
+              ? 'border-acc bg-acc/10'
+              : 'hover:bg-panel2/60 border-transparent'
           }`}
         >
-          <div className="font-mono text-[11px] text-ink">unmapped sends</div>
-          <div className="mt-0.5 text-[9.5px] text-faint">{unmapped.length} frame{unmapped.length === 1 ? '' : 's'} outside an event</div>
+          <div className="text-ink font-mono text-[11px]">unmapped sends</div>
+          <div className="text-faint mt-0.5 text-[9.5px]">
+            {unmapped.length} frame{unmapped.length === 1 ? '' : 's'} outside an event
+          </div>
         </button>
       )}
-      {!filtered.length && q && <p className="px-3 py-6 text-center text-[10.5px] italic text-faint">no event matches “{query}”.</p>}
+      {!filtered.length && q && (
+        <p className="text-faint px-3 py-6 text-center text-[10.5px] italic">
+          no event matches “{query}”.
+        </p>
+      )}
       {!exchanges.length && !preamble.length && !unmapped.length && (
-        <p className="px-3 py-6 text-[10.5px] italic text-faint">no event dispatch resolved.</p>
+        <p className="text-faint px-3 py-6 text-[10.5px] italic">no event dispatch resolved.</p>
       )}
     </>
   )
 
   return (
     <div className="stream-board h-full">
-      <aside className="stream-list border-r border-line bg-panel/20">
-        <div className="sticky top-0 z-10 border-b border-line bg-[var(--color-panel)] p-2">
+      <aside className="stream-list border-line bg-panel/20 border-r">
+        <div className="border-line sticky top-0 z-10 border-b bg-[var(--color-panel)] p-2">
           <div className="mb-2 flex items-baseline gap-2">
-            <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">
+            <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">
               {exchanges.length} events
             </span>
-            <span className="ml-auto text-[9.5px] text-faint">
-              {isSse ? `${send.length} payload${send.length === 1 ? '' : 's'}` : `${recv.length} in · ${send.length} out`}
+            <span className="text-faint ml-auto text-[9.5px]">
+              {isSse
+                ? `${send.length} payload${send.length === 1 ? '' : 's'}`
+                : `${recv.length} in · ${send.length} out`}
             </span>
           </div>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="filter event, type or field"
-            className="w-full rounded-[4px] border border-line bg-canvas px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint focus:border-line2"
+            className="border-line bg-canvas text-ink placeholder:text-faint focus:border-line2 w-full rounded-[4px] border px-2 py-1 text-[11px] outline-none"
           />
         </div>
         <div>{listRows}</div>
@@ -950,19 +1106,37 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
       <section className="stream-detail min-w-0">
         {active ? (
           <div className="mx-auto max-w-[760px] p-4">
-            <div className="flex flex-wrap items-start gap-3 border-b border-line pb-3">
+            <div className="border-line flex flex-wrap items-start gap-3 border-b pb-3">
               <div className="min-w-0 flex-1">
-                <div className="text-[9px] uppercase tracking-[0.14em] text-faint">
+                <div className="text-faint text-[9px] tracking-[0.14em] uppercase">
                   {active.startsWith('__') ? 'outside the event switch' : 'selected event'}
                 </div>
-                <div className="mt-0.5 break-words font-mono text-[18px] leading-tight text-ink">
-                  {active === '__preamble' ? 'preamble' : active === '__unmapped' ? 'unmapped sends' : active}
+                <div className="text-ink mt-0.5 font-mono text-[18px] leading-tight break-words">
+                  {active === '__preamble'
+                    ? 'preamble'
+                    : active === '__unmapped'
+                      ? 'unmapped sends'
+                      : active}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-faint">
-                  <span>{frameCount} frame{frameCount === 1 ? '' : 's'}</span>
-                  {exchange && !isSse && <span>{exchange.inbound.length} client · {exchange.outbound.length} server</span>}
-                  {eventCalls.length > 0 && <span>{eventCalls.length} external call{eventCalls.length === 1 ? '' : 's'}</span>}
-                  {firstFrame?.file && <span className="font-mono">{firstFrame.file}:{firstFrame.l ?? 0}</span>}
+                <div className="text-faint mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                  <span>
+                    {frameCount} frame{frameCount === 1 ? '' : 's'}
+                  </span>
+                  {exchange && !isSse && (
+                    <span>
+                      {exchange.inbound.length} client · {exchange.outbound.length} server
+                    </span>
+                  )}
+                  {eventCalls.length > 0 && (
+                    <span>
+                      {eventCalls.length} external call{eventCalls.length === 1 ? '' : 's'}
+                    </span>
+                  )}
+                  {firstFrame?.file && (
+                    <span className="font-mono">
+                      {firstFrame.file}:{firstFrame.l ?? 0}
+                    </span>
+                  )}
                 </div>
               </div>
               {handlerHref && (
@@ -974,7 +1148,9 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
 
             {active === '__preamble' ? (
               <div className="mt-4">
-                <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">received before the switch</div>
+                <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">
+                  received before the switch
+                </div>
                 <div className="space-y-1">
                   {preamble.map((m, i) => (
                     <MessageCard key={`pre:${i}`} m={m} onOpen={() => setPicked({ m })} />
@@ -983,7 +1159,9 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
               </div>
             ) : active === '__unmapped' ? (
               <div className="mt-4">
-                <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">sent outside a resolved event</div>
+                <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">
+                  sent outside a resolved event
+                </div>
                 <div className="space-y-1">
                   {unmapped.map((m, i) => (
                     <MessageCard key={`un:${i}`} m={m} onOpen={() => setPicked({ m })} />
@@ -996,15 +1174,22 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
 
                 {!isSse && (
                   <div className="mt-4">
-                    <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">client sends</div>
+                    <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">
+                      client sends
+                    </div>
                     {exchange.inbound.length ? (
                       <div className="space-y-1">
                         {exchange.inbound.map((m, i) => (
-                          <MessageCard key={`in:${i}`} m={m} event={exchange.event} onOpen={() => setPicked({ m, event: exchange.event })} />
+                          <MessageCard
+                            key={`in:${i}`}
+                            m={m}
+                            event={exchange.event}
+                            onOpen={() => setPicked({ m, event: exchange.event })}
+                          />
                         ))}
                       </div>
                     ) : (
-                      <p className="rounded-[4px] border border-dashed border-line px-3 py-2 text-[10.5px] text-faint">
+                      <p className="border-line text-faint rounded-[4px] border border-dashed px-3 py-2 text-[10.5px]">
                         server-initiated · no client frame for this event
                       </p>
                     )}
@@ -1013,16 +1198,18 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
 
                 {eventFlow?.flow?.length ? (
                   <div className="mt-4">
-                    <div className="mb-1.5 flex items-center gap-2 text-[9.5px] uppercase tracking-[0.14em] text-faint">
+                    <div className="text-faint mb-1.5 flex items-center gap-2 text-[9.5px] tracking-[0.14em] uppercase">
                       <span>processing</span>
                       {sharedFlow ? (
-                        <span className="normal-case tracking-normal text-[9px] text-faint">shared stream loop</span>
+                        <span className="text-faint text-[9px] tracking-normal normal-case">
+                          shared stream loop
+                        </span>
                       ) : null}
                       {flowKey ? (
                         <button
                           type="button"
                           onClick={() => openFn(flowKey)}
-                          className="ml-auto normal-case tracking-normal text-[9.5px] text-acc hover:underline"
+                          className="text-acc ml-auto text-[9.5px] tracking-normal normal-case hover:underline"
                         >
                           full flow ›
                         </button>
@@ -1032,33 +1219,44 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
                   </div>
                 ) : null}
 
-                <div className="my-4 flex items-center gap-2 text-[9.5px] uppercase tracking-[0.14em] text-faint">
-                  <span className="h-px flex-1 bg-line" />
+                <div className="text-faint my-4 flex items-center gap-2 text-[9.5px] tracking-[0.14em] uppercase">
+                  <span className="bg-line h-px flex-1" />
                   {isSse ? 'handler writes' : 'handler dispatches'}
-                  <span className="h-px flex-1 bg-line" />
+                  <span className="bg-line h-px flex-1" />
                 </div>
 
                 <div>
-                  <div className="mb-1.5 text-[9.5px] uppercase tracking-[0.14em] text-faint">
+                  <div className="text-faint mb-1.5 text-[9.5px] tracking-[0.14em] uppercase">
                     {isSse ? 'payload sent' : 'server replies'}
                   </div>
                   {exchange.outbound.length ? (
                     <div className="space-y-1">
                       {exchange.outbound.map((m, i) => (
-                        <MessageCard key={`out:${i}`} m={m} event={exchange.event} onOpen={() => setPicked({ m, event: exchange.event })} />
+                        <MessageCard
+                          key={`out:${i}`}
+                          m={m}
+                          event={exchange.event}
+                          onOpen={() => setPicked({ m, event: exchange.event })}
+                        />
                       ))}
                     </div>
                   ) : (
-                    <p className="rounded-[4px] border border-dashed border-line px-3 py-2 text-[10.5px] text-faint">no reply resolved.</p>
+                    <p className="border-line text-faint rounded-[4px] border border-dashed px-3 py-2 text-[10.5px]">
+                      no reply resolved.
+                    </p>
                   )}
-                  {isSse && exchange.outbound.length > 0 && exchange.outbound.every((m) => !m.ev) && (
-                    <p className="mt-1.5 text-[10px] text-faint">this payload shape is sent for every event.</p>
-                  )}
+                  {isSse &&
+                    exchange.outbound.length > 0 &&
+                    exchange.outbound.every((m) => !m.ev) && (
+                      <p className="text-faint mt-1.5 text-[10px]">
+                        this payload shape is sent for every event.
+                      </p>
+                    )}
                 </div>
 
                 {effects.length > 0 && (
                   <div className="mt-6">
-                    <div className="mb-2 text-[9.5px] uppercase tracking-[0.14em] text-faint">
+                    <div className="text-faint mb-2 text-[9.5px] tracking-[0.14em] uppercase">
                       after effects
                     </div>
                     <EffectRows items={effects} onFn={openFn} />
@@ -1067,16 +1265,20 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
               </>
             ) : null}
 
-            <div className="mt-6 border-t border-line pt-3">
-              <div className="mb-2 text-[9.5px] uppercase tracking-[0.14em] text-faint">deeper calls</div>
+            <div className="border-line mt-6 border-t pt-3">
+              <div className="text-faint mb-2 text-[9.5px] tracking-[0.14em] uppercase">
+                deeper calls
+              </div>
               {deeperCalls.length ? (
                 <ExternalCalls items={deeperCalls} onFn={openFn} />
               ) : (
-                <p className="text-[10.5px] italic text-faint">no deeper database, cache or outbound call is tied to this event.</p>
+                <p className="text-faint text-[10.5px] italic">
+                  no deeper database, cache or outbound call is tied to this event.
+                </p>
               )}
               {routeCalls.length > 0 && (
-                <details className="mt-3 border-t border-line/50 pt-2">
-                  <summary className="cursor-pointer text-[10px] text-faint hover:text-mut">
+                <details className="border-line/50 mt-3 border-t pt-2">
+                  <summary className="text-faint hover:text-mut cursor-pointer text-[10px]">
                     route-wide calls · {routeCalls.length}
                   </summary>
                   <div className="mt-2">
@@ -1087,7 +1289,9 @@ function StreamBoard({ route, flows, ri }: { route: Route; flows?: Record<string
             </div>
           </div>
         ) : (
-          <p className="p-6 text-[11px] italic text-faint">no event dispatch resolved — open the flow to follow the handler.</p>
+          <p className="text-faint p-6 text-[11px] italic">
+            no event dispatch resolved — open the flow to follow the handler.
+          </p>
         )}
       </section>
 
@@ -1127,8 +1331,8 @@ function RouterView() {
             meta={`${count} under this path · click a box to open it`}
             note="each column is one path segment. open a group to walk deeper, a route to see its middleware."
           />
-          <div className="flex items-center gap-2 border-b border-line bg-panel/20 px-4 py-1.5">
-            <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">protocol</span>
+          <div className="border-line bg-panel/20 flex items-center gap-2 border-b px-4 py-1.5">
+            <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">protocol</span>
             <Segmented
               value={proto}
               onChange={(v) => setProto(v as typeof proto)}
@@ -1139,7 +1343,7 @@ function RouterView() {
                 { value: 'sse', label: 'sse' },
               ]}
             />
-            <span className="ml-auto text-[10px] text-faint">
+            <span className="text-faint ml-auto text-[10px]">
               {count} {count === 1 ? 'route' : 'routes'}
             </span>
           </div>
@@ -1157,8 +1361,8 @@ function PipelineView() {
   const timing = r ? timingOf(data, r) : undefined
   const over = timing
   const scene = useMemo(
-    () => (r ? buildPipelineScene(r, ri, over, data.flows) : { nodes: [], edges: [], key: "" }),
-    [r, ri, over],
+    () => (r ? buildPipelineScene(r, ri, over, data.flows) : { nodes: [], edges: [], key: '' }),
+    [r, ri, over, data.flows],
   )
   const [sheet, setSheet] = useState<number | null>(null)
   const [streamView, setStreamView] = useState<'exchanges' | 'canvas'>('exchanges')
@@ -1167,7 +1371,7 @@ function PipelineView() {
     setStreamView('exchanges')
   }, [ri])
 
-  if (!r) return <div className="p-6 text-[12px] text-faint">no such route</div>
+  if (!r) return <div className="text-faint p-6 text-[12px]">no such route</div>
 
   const handler = r.ch[r.ch.length - 1]
   const mw = r.ch.filter((s) => (s.r ?? '') === 'middleware').length
@@ -1179,14 +1383,13 @@ function PipelineView() {
   const meta =
     `${r.f}:${r.l} · ${r.ch.length} step${r.ch.length === 1 ? '' : 's'} · ${mw} middleware first` +
     (over ? ` · ${msOf(over.total)} per request · ${over.spans} spans` : '')
-  const note =
-    over
-      ? slow && slowName
-        ? `slowest stage: ${slowName} — ${msOf(slow.m)} median, ${msOf(slow.p95)} p95, ${Math.round(slow.sh * 100)}% of the time`
-        : 'the trace matched this route but not its stages'
-      : handler?.d
-        ? undefined
-        : 'no doc comment on the handler — open it, the flow is the description'
+  const note = over
+    ? slow && slowName
+      ? `slowest stage: ${slowName} — ${msOf(slow.m)} median, ${msOf(slow.p95)} p95, ${Math.round(slow.sh * 100)}% of the time`
+      : 'the trace matched this route but not its stages'
+    : handler?.d
+      ? undefined
+      : 'no doc comment on the handler — open it, the flow is the description'
 
   const card = (
     <ScopeCard
@@ -1218,7 +1421,7 @@ function PipelineView() {
     return (
       <div className="flex h-full flex-col">
         {card}
-        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel/30 px-3 py-1.5">
+        <div className="border-line bg-panel/30 flex flex-wrap items-center gap-2 border-b px-3 py-1.5">
           <Segmented
             value={streamView}
             options={[
@@ -1227,7 +1430,9 @@ function PipelineView() {
             ]}
             onChange={(v) => setStreamView(v as 'exchanges' | 'canvas')}
           />
-          <span className="text-[10px] text-faint">pick an event to read its request, replies and calls</span>
+          <span className="text-faint text-[10px]">
+            pick an event to read its request, replies and calls
+          </span>
         </div>
         <div className="relative min-h-0 flex-1">
           {streamView === 'exchanges' ? (
@@ -1236,7 +1441,7 @@ function PipelineView() {
             <SceneCanvas scene={scene} />
           )}
         </div>
-        <div className="max-h-[26vh] shrink-0 overflow-auto border-t border-line bg-panel/30">
+        <div className="border-line bg-panel/30 max-h-[26vh] shrink-0 overflow-auto border-t">
           <DocPanel r={r} />
         </div>
         {sheets}
@@ -1261,17 +1466,31 @@ function FlowView() {
   const st = r?.ch[si]
   const flow = st?.fk ? flowOf(data, st.fk) : undefined
   const key = st?.fk ?? 'none'
-  const nextStage = r && si + 1 < r.ch.length ? { label: r.ch[si + 1].n, href: '/r/' + ri + '/s/' + (si + 1) } : undefined
-  const prevStage = r && si > 0 ? { label: r.ch[si - 1].n, href: '/r/' + ri + '/s/' + (si - 1) } : undefined
+  const nextStage = useMemo(
+    () =>
+      r && si + 1 < r.ch.length
+        ? { label: r.ch[si + 1].n, href: '/r/' + ri + '/s/' + (si + 1) }
+        : undefined,
+    [r, ri, si],
+  )
+  const prevStage = useMemo(
+    () =>
+      r && si > 0 ? { label: r.ch[si - 1].n, href: '/r/' + ri + '/s/' + (si - 1) } : undefined,
+    [r, ri, si],
+  )
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, nextStage, prevStage, st?.in, { ri, si }) : { nodes: [], edges: [], key: "" }),
-    [flow, key, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, st?.in, ri, si],
+    () =>
+      flow
+        ? buildFlowScene(flow, key, nextStage, prevStage, st?.in, { ri, si })
+        : { nodes: [], edges: [], key: '' },
+    [flow, key, nextStage, prevStage, st?.in, ri, si],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
     const onSrc = (e: Event) => {
-      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>).detail
+      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>)
+        .detail
       const offset = (detail.startLine ?? 1) - 1
       const lines = detail.lines?.map((l) => l - offset)
       setFocus({ line: lines?.[0] ?? detail.line - offset, lines })
@@ -1281,31 +1500,31 @@ function FlowView() {
     return () => window.removeEventListener('synoptic:source', onSrc)
   }, [])
 
-  if (!r || !st) return <div className="p-6 text-[12px] text-faint">no such step</div>
+  if (!r || !st) return <div className="text-faint p-6 text-[12px]">no such step</div>
 
   return (
     <GraphPage
       scene={scene}
       card={
-      <ScopeCard
-        title={st.n}
-        badge={st.r ?? st.k}
-        meta={st.f ? `${st.f}:${st.l}` : undefined}
-        doc={st.d}
-        note={
-          !st.d
-            ? flow
-              ? 'no doc comment on this one — the flow below is what it does'
-              : 'no doc comment, and the body is outside this repo'
-            : undefined
-        }
-        tags={touchTags(st)}
-        onSource={() => {
-          setFocus({})
-          setSheet(true)
-        }}
-        sourceLabel="source"
-      />
+        <ScopeCard
+          title={st.n}
+          badge={st.r ?? st.k}
+          meta={st.f ? `${st.f}:${st.l}` : undefined}
+          doc={st.d}
+          note={
+            !st.d
+              ? flow
+                ? 'no doc comment on this one — the flow below is what it does'
+                : 'no doc comment, and the body is outside this repo'
+              : undefined
+          }
+          tags={touchTags(st)}
+          onSource={() => {
+            setFocus({})
+            setSheet(true)
+          }}
+          sourceLabel="source"
+        />
       }
     >
       {st.in && st.in.length > 0 && <Inputs items={st.in} flush />}
@@ -1333,24 +1552,43 @@ function FnView() {
   const flow: FuncFlow | undefined = flowOf(data, key)
   const parentRi = Number(search.ri)
   const parentSi = Number(search.si)
-  const parentOk = search.ri !== undefined && search.si !== undefined && Number.isInteger(parentRi) && Number.isInteger(parentSi)
-  const origin = parentOk ? { ri: parentRi, si: parentSi } : undefined
+  const parentOk =
+    search.ri !== undefined &&
+    search.si !== undefined &&
+    Number.isInteger(parentRi) &&
+    Number.isInteger(parentSi)
+  const origin = useMemo(
+    () => (parentOk ? { ri: parentRi, si: parentSi } : undefined),
+    [parentOk, parentRi, parentSi],
+  )
   const parent = parentOk ? data.routes[parentRi] : undefined
-  const nextStage = parent && parentSi + 1 < parent.ch.length
-    ? { label: parent.ch[parentSi + 1].n, href: `/r/${parentRi}/s/${parentSi + 1}` }
-    : undefined
-  const prevStage = parent && parentSi > 0
-    ? { label: parent.ch[parentSi - 1].n, href: `/r/${parentRi}/s/${parentSi - 1}` }
-    : undefined
+  const nextStage = useMemo(
+    () =>
+      parent && parentSi + 1 < parent.ch.length
+        ? { label: parent.ch[parentSi + 1].n, href: `/r/${parentRi}/s/${parentSi + 1}` }
+        : undefined,
+    [parent, parentRi, parentSi],
+  )
+  const prevStage = useMemo(
+    () =>
+      parent && parentSi > 0
+        ? { label: parent.ch[parentSi - 1].n, href: `/r/${parentRi}/s/${parentSi - 1}` }
+        : undefined,
+    [parent, parentRi, parentSi],
+  )
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, nextStage, prevStage, flow.in, origin) : { nodes: [], edges: [], key: "" }),
-    [flow, key, flow?.in, nextStage?.label, nextStage?.href, prevStage?.label, prevStage?.href, parentOk, parentRi, parentSi],
+    () =>
+      flow
+        ? buildFlowScene(flow, key, nextStage, prevStage, flow.in, origin)
+        : { nodes: [], edges: [], key: '' },
+    [flow, key, nextStage, prevStage, origin],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
     const onSrc = (e: Event) => {
-      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>).detail
+      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>)
+        .detail
       const offset = (detail.startLine ?? 1) - 1
       const lines = detail.lines?.map((l) => l - offset)
       setFocus({ line: lines?.[0] ?? detail.line - offset, lines })
@@ -1360,24 +1598,29 @@ function FnView() {
     return () => window.removeEventListener('synoptic:source', onSrc)
   }, [])
 
-  if (!flow) return <div className="p-6 text-[12px] text-faint">this function is not in the module</div>
+  if (!flow)
+    return <div className="text-faint p-6 text-[12px]">this function is not in the module</div>
 
   return (
     <GraphPage
       scene={scene}
       card={
-      <ScopeCard
-        title={flow.n}
-        badge="func"
-        meta={flow.f ? `${flow.f}:${flow.l}${parent ? ` · ${parent.m} ${parent.p} · stage ${parentSi + 1}` : ''}` : key}
-        doc={flow.d}
-        note={!flow.d ? 'no doc comment on this one — the flow below is what it does' : undefined}
-        onSource={() => {
-          setFocus({})
-          setSheet(true)
-        }}
-        sourceLabel="source"
-      />
+        <ScopeCard
+          title={flow.n}
+          badge="func"
+          meta={
+            flow.f
+              ? `${flow.f}:${flow.l}${parent ? ` · ${parent.m} ${parent.p} · stage ${parentSi + 1}` : ''}`
+              : key
+          }
+          doc={flow.d}
+          note={!flow.d ? 'no doc comment on this one — the flow below is what it does' : undefined}
+          onSource={() => {
+            setFocus({})
+            setSheet(true)
+          }}
+          sourceLabel="source"
+        />
       }
     >
       {flow.in && flow.in.length > 0 && <Inputs items={flow.in} flush />}
@@ -1400,10 +1643,15 @@ function FnView() {
 
 function TypeView() {
   const data = useData()
-  const search = useSearch({ strict: false }) as { k?: string; i?: string; ri?: string; si?: string }
+  const search = useSearch({ strict: false }) as {
+    k?: string
+    i?: string
+    ri?: string
+    si?: string
+  }
   const key = search.k ?? ''
   const t: SynType | undefined = data.types?.[key]
-  if (!t) return <div className="p-6 text-[12px] text-faint">this type is not in the module</div>
+  if (!t) return <div className="text-faint p-6 text-[12px]">this type is not in the module</div>
   const iface = search.i ? data.types?.[search.i] : undefined
   const ri = Number(search.ri ?? '')
   const si = Number(search.si ?? '')
@@ -1425,7 +1673,9 @@ function TypeView() {
     if (!base) return undefined
     const qual = norm.includes('.') ? norm.slice(0, norm.lastIndexOf('.')).split('.').pop() : ''
     if (qual) {
-      return Object.values(data.types ?? {}).find((x) => x.n === base && (x.pkg === qual || x.pkg.endsWith('/' + qual)))
+      return Object.values(data.types ?? {}).find(
+        (x) => x.n === base && (x.pkg === qual || x.pkg.endsWith('/' + qual)),
+      )
     }
     const same = data.types?.[`${t.pkg}|${base}`]
     if (same) return same
@@ -1438,14 +1688,22 @@ function TypeView() {
         title={t.n}
         badge={t.k}
         meta={t.f ? `${t.f}:${t.l ?? 1}` : t.pkg}
-        note={t.k === 'interface' ? 'interface · implemented by the structs below' : 'struct · fields and methods'}
+        note={
+          t.k === 'interface'
+            ? 'interface · implemented by the structs below'
+            : 'struct · fields and methods'
+        }
       />
       <div className="grid gap-3 p-4 lg:grid-cols-2">
         {t.k === 'struct' && (
-          <section className="rounded-[6px] border border-line bg-panel/40">
-            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">fields</div>
-            <div className="divide-y divide-line/60">
-              {(t.fields ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no fields</div>}
+          <section className="border-line bg-panel/40 rounded-[6px] border">
+            <div className="border-line text-mut border-b px-3 py-1.5 text-[10px] tracking-[0.14em] uppercase">
+              fields
+            </div>
+            <div className="divide-line/60 divide-y">
+              {(t.fields ?? []).length === 0 && (
+                <div className="text-faint px-3 py-2 text-[11px]">no fields</div>
+              )}
               {(t.fields ?? []).map((f) => {
                 const ft = fieldType(f.t)
                 return (
@@ -1456,19 +1714,27 @@ function TypeView() {
                     className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${ft ? 'hover:bg-panel2' : 'cursor-default'}`}
                   >
                     <span className="text-ink">{f.n}</span>
-                    <span className="truncate text-info">{f.t}</span>
-                    {f.e && <span className="text-[9px] uppercase tracking-[0.1em] text-faint">embedded</span>}
-                    {ft && <span className="ml-auto shrink-0 text-[9px] text-faint">open ›</span>}
+                    <span className="text-info truncate">{f.t}</span>
+                    {f.e && (
+                      <span className="text-faint text-[9px] tracking-[0.1em] uppercase">
+                        embedded
+                      </span>
+                    )}
+                    {ft && <span className="text-faint ml-auto shrink-0 text-[9px]">open ›</span>}
                   </button>
                 )
               })}
             </div>
           </section>
         )}
-        <section className="rounded-[6px] border border-line bg-panel/40">
-          <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">methods</div>
-          <div className="divide-y divide-line/60">
-            {(t.methods ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no methods</div>}
+        <section className="border-line bg-panel/40 rounded-[6px] border">
+          <div className="border-line text-mut border-b px-3 py-1.5 text-[10px] tracking-[0.14em] uppercase">
+            methods
+          </div>
+          <div className="divide-line/60 divide-y">
+            {(t.methods ?? []).length === 0 && (
+              <div className="text-faint px-3 py-2 text-[11px]">no methods</div>
+            )}
             {(t.methods ?? []).map((m) => (
               <button
                 key={m.n + (m.k ?? '')}
@@ -1477,26 +1743,35 @@ function TypeView() {
                 className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] ${m.k ? 'hover:bg-panel2' : 'cursor-default'}`}
               >
                 <span className="text-ink">{m.n}</span>
-                <span className="min-w-0 flex-1 truncate text-mut">{m.sig}</span>
-                {m.k && <span className="shrink-0 text-[9px] text-faint">open ›</span>}
+                <span className="text-mut min-w-0 flex-1 truncate">{m.sig}</span>
+                {m.k && <span className="text-faint shrink-0 text-[9px]">open ›</span>}
               </button>
             ))}
           </div>
         </section>
         {t.k === 'interface' && (
-          <section className="rounded-[6px] border border-line bg-panel/40">
-            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">implemented by</div>
-            <div className="divide-y divide-line/60">
-              {(t.impls ?? []).length === 0 && <div className="px-3 py-2 text-[11px] text-faint">no in-module implementation</div>}
+          <section className="border-line bg-panel/40 rounded-[6px] border">
+            <div className="border-line text-mut border-b px-3 py-1.5 text-[10px] tracking-[0.14em] uppercase">
+              implemented by
+            </div>
+            <div className="divide-line/60 divide-y">
+              {(t.impls ?? []).length === 0 && (
+                <div className="text-faint px-3 py-2 text-[11px]">no in-module implementation</div>
+              )}
               {(t.impls ?? []).map((ik) => {
                 const it = data.types?.[ik]
                 if (!it) return null
                 return (
-                  <button key={ik} onClick={() => goto(`/t?k=${encodeURIComponent(ik)}&i=${encodeURIComponent(t.key)}${origin}`)}
-                    className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-panel2">
+                  <button
+                    key={ik}
+                    onClick={() =>
+                      goto(`/t?k=${encodeURIComponent(ik)}&i=${encodeURIComponent(t.key)}${origin}`)
+                    }
+                    className="hover:bg-panel2 flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px]"
+                  >
                     <span className="text-ink">{it.n}</span>
-                    <span className="min-w-0 flex-1 truncate text-mut">{it.pkg}</span>
-                    <span className="text-[9px] text-faint">open ›</span>
+                    <span className="text-mut min-w-0 flex-1 truncate">{it.pkg}</span>
+                    <span className="text-faint text-[9px]">open ›</span>
                   </button>
                 )
               })}
@@ -1504,17 +1779,22 @@ function TypeView() {
           </section>
         )}
         {t.k === 'struct' && (t.impls ?? []).length > 0 && (
-          <section className="rounded-[6px] border border-line bg-panel/40">
-            <div className="border-b border-line px-3 py-1.5 text-[10px] uppercase tracking-[0.14em] text-mut">implements</div>
-            <div className="divide-y divide-line/60">
+          <section className="border-line bg-panel/40 rounded-[6px] border">
+            <div className="border-line text-mut border-b px-3 py-1.5 text-[10px] tracking-[0.14em] uppercase">
+              implements
+            </div>
+            <div className="divide-line/60 divide-y">
               {(t.impls ?? []).map((ik) => {
                 const it = data.types?.[ik]
                 if (!it) return null
                 return (
-                  <button key={ik} onClick={() => goto(`/t?k=${encodeURIComponent(ik)}${origin}`)}
-                    className="flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-panel2">
+                  <button
+                    key={ik}
+                    onClick={() => goto(`/t?k=${encodeURIComponent(ik)}${origin}`)}
+                    className="hover:bg-panel2 flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-[11px]"
+                  >
                     <span className="text-ink">{it.n}</span>
-                    <span className="min-w-0 flex-1 truncate text-mut">{it.pkg}</span>
+                    <span className="text-mut min-w-0 flex-1 truncate">{it.pkg}</span>
                   </button>
                 )
               })}
@@ -1528,7 +1808,8 @@ function TypeView() {
 
 /* ---------- rpc ---------- */
 
-const emptyScene: Scene = { nodes: [], edges: [], key: "" }
+const EMPTY_MESSAGES: StreamMessage[] = []
+const emptyScene: Scene = { nodes: [], edges: [], key: '' }
 
 function kindTone(k: string): 'default' | 'info' | 'warn' | 'accent' {
   if (k === 'bidi') return 'accent'
@@ -1541,8 +1822,10 @@ function RpcCell({ label, value }: { label: string; value?: string }) {
   if (!value) return null
   return (
     <div className="min-w-0">
-      <div className="text-[9.5px] uppercase tracking-[0.14em] text-faint">{label}</div>
-      <div className="mt-0.5 truncate text-[11.5px] text-ink" title={value}>{value}</div>
+      <div className="text-faint text-[9.5px] tracking-[0.14em] uppercase">{label}</div>
+      <div className="text-ink mt-0.5 truncate text-[11.5px]" title={value}>
+        {value}
+      </div>
     </div>
   )
 }
@@ -1551,52 +1834,66 @@ function RPCView() {
   const data = useData()
   const services = data.services ?? []
   if (services.length === 0) {
-    return <div className="p-6 text-[12px] text-faint">no gRPC services were found in this module</div>
+    return (
+      <div className="text-faint p-6 text-[12px]">no gRPC services were found in this module</div>
+    )
   }
   return (
     <div className="h-full overflow-auto p-4">
       <div className="mb-3 flex items-baseline gap-2">
-        <span className="text-[13px] text-ink">RPC</span>
-        <span className="text-[10.5px] text-faint">
+        <span className="text-ink text-[13px]">RPC</span>
+        <span className="text-faint text-[10.5px]">
           {services.length} services · {services.reduce((n, s) => n + s.methods.length, 0)} methods
         </span>
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {services.map((s, si) => (
-          <section key={s.n} className="overflow-hidden rounded-[6px] border border-line bg-panel/30">
-            <header className="border-b border-line px-3 py-2">
+          <section
+            key={s.n}
+            className="border-line bg-panel/30 overflow-hidden rounded-[6px] border"
+          >
+            <header className="border-line border-b px-3 py-2">
               <div className="flex items-baseline gap-2">
-                <span className="truncate text-[12.5px] text-ink">{s.n}</span>
-                {s.p && <span className="text-[10px] text-faint">{s.p}</span>}
-                <span className="ml-auto shrink-0 text-[10px] text-faint">{s.methods.length} methods</span>
+                <span className="text-ink truncate text-[12.5px]">{s.n}</span>
+                {s.p && <span className="text-faint text-[10px]">{s.p}</span>}
+                <span className="text-faint ml-auto shrink-0 text-[10px]">
+                  {s.methods.length} methods
+                </span>
               </div>
-              {s.f && <div className="mt-0.5 text-[10px] text-faint">{s.f}{s.l ? `:${s.l}` : ''}</div>}
+              {s.f && (
+                <div className="text-faint mt-0.5 text-[10px]">
+                  {s.f}
+                  {s.l ? `:${s.l}` : ''}
+                </div>
+              )}
               {(s.mw ?? []).length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {s.mw!.map((mw) => (
-                    <Badge key={mw.n} variant="plain">{mw.n}</Badge>
+                    <Badge key={mw.n} variant="plain">
+                      {mw.n}
+                    </Badge>
                   ))}
                 </div>
               )}
             </header>
-            <div className="divide-y divide-line/60">
+            <div className="divide-line/60 divide-y">
               {s.methods.map((m, mi) => (
                 <button
                   key={m.n}
                   onClick={() => goto(`/rpc/${si}/${mi}`)}
-                  className="flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-panel2"
+                  className="hover:bg-panel2 flex w-full flex-col gap-1 px-3 py-2 text-left"
                 >
                   <div className="flex items-baseline gap-2">
                     <Badge variant={kindTone(m.k)}>{m.k}</Badge>
-                    <span className="truncate text-[11.5px] text-ink">{m.n}</span>
-                    <span className="ml-auto shrink-0 text-[9.5px] text-faint">{m.p}</span>
+                    <span className="text-ink truncate text-[11.5px]">{m.n}</span>
+                    <span className="text-faint ml-auto shrink-0 text-[9.5px]">{m.p}</span>
                   </div>
-                  <div className="flex min-w-0 items-baseline gap-1.5 text-[10.5px] text-mut">
+                  <div className="text-mut flex min-w-0 items-baseline gap-1.5 text-[10.5px]">
                     <span className="truncate">{m.rq || 'request'}</span>
                     <span className="text-faint">→</span>
                     <span className="truncate">{m.rs || 'response'}</span>
                   </div>
-                  {m.d && <div className="line-clamp-2 text-[10.5px] text-mut">{m.d}</div>}
+                  {m.d && <div className="text-mut line-clamp-2 text-[10.5px]">{m.d}</div>}
                 </button>
               ))}
             </div>
@@ -1618,13 +1915,14 @@ function RPCMethodView() {
   const flow: FuncFlow | undefined = key ? flowOf(data, key) : undefined
   const scene = useMemo(
     () => (flow ? buildFlowScene(flow, key, undefined, undefined, flow.in, undefined) : emptyScene),
-    [flow, key, flow?.in],
+    [flow, key],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
   useEffect(() => {
     const onSrc = (e: Event) => {
-      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>).detail
+      const detail = (e as CustomEvent<{ line: number; startLine?: number; lines?: number[] }>)
+        .detail
       const offset = (detail.startLine ?? 1) - 1
       const lines = detail.lines?.map((l) => l - offset)
       setFocus({ line: lines?.[0] ?? detail.line - offset, lines })
@@ -1634,7 +1932,8 @@ function RPCMethodView() {
     return () => window.removeEventListener('synoptic:source', onSrc)
   }, [])
 
-  if (!svc || !method) return <div className="p-6 text-[12px] text-faint">this RPC method is not indexed</div>
+  if (!svc || !method)
+    return <div className="text-faint p-6 text-[12px]">this RPC method is not indexed</div>
 
   return (
     <GraphPage
@@ -1646,7 +1945,14 @@ function RPCMethodView() {
           meta={method.f ? `${method.f}:${method.l} · ${svc.n}` : svc.n}
           doc={method.d}
           note={!method.d ? 'no doc comment on this method' : undefined}
-          onSource={flow ? () => { setFocus({}); setSheet(true) } : undefined}
+          onSource={
+            flow
+              ? () => {
+                  setFocus({})
+                  setSheet(true)
+                }
+              : undefined
+          }
           sourceLabel="source"
         />
       }
@@ -1659,24 +1965,34 @@ function RPCMethodView() {
       </div>
       {(svc.mw ?? []).length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3">
-          <span className="text-[9.5px] uppercase tracking-[0.14em] text-faint">interceptors</span>
-          {svc.mw!.map((mw) => <Badge key={mw.n} variant="plain">{mw.n}</Badge>)}
+          <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">interceptors</span>
+          {svc.mw!.map((mw) => (
+            <Badge key={mw.n} variant="plain">
+              {mw.n}
+            </Badge>
+          ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
-        <code className="min-w-0 flex-1 truncate text-[10.5px] text-mut">{method.curl}</code>
+      <div className="border-line flex flex-wrap items-center gap-2 border-t px-3 py-2">
+        <code className="text-mut min-w-0 flex-1 truncate text-[10.5px]">{method.curl}</code>
         <Button
           variant="ghost"
           size="sm"
           onClick={() => {
             if (method.curl) navigator.clipboard?.writeText(method.curl)
-            window.dispatchEvent(new CustomEvent('synoptic:toast', { detail: { message: 'grpcurl copied' } }))
+            window.dispatchEvent(
+              new CustomEvent('synoptic:toast', { detail: { message: 'grpcurl copied' } }),
+            )
           }}
         >
           copy
         </Button>
         {method.fk && (
-          <Button variant="ghost" size="sm" onClick={() => goto(`/f?k=${encodeURIComponent(method.fk!)}`)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => goto(`/f?k=${encodeURIComponent(method.fk!)}`)}
+          >
             open flow
           </Button>
         )}
@@ -1700,16 +2016,45 @@ function RPCMethodView() {
 /* ---------- router ---------- */
 
 const rootRoute = createRootRoute({ component: Root })
-const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: RouterView })
-const groupRoute = createRoute({ getParentRoute: () => rootRoute, path: '/g/$', component: RouterView })
-const routeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/r/$ri', component: PipelineView })
-const stageRoute = createRoute({ getParentRoute: () => rootRoute, path: '/r/$ri/s/$si', component: FlowView })
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: RouterView,
+})
+const groupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/g/$',
+  component: RouterView,
+})
+const routeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/r/$ri',
+  component: PipelineView,
+})
+const stageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/r/$ri/s/$si',
+  component: FlowView,
+})
 const fnRoute = createRoute({ getParentRoute: () => rootRoute, path: '/f', component: FnView })
 const typeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/t', component: TypeView })
 const rpcRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rpc', component: RPCView })
-const rpcMethodRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rpc/$si/$mi', component: RPCMethodView })
+const rpcMethodRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/rpc/$si/$mi',
+  component: RPCMethodView,
+})
 
-const routeTree = rootRoute.addChildren([indexRoute, groupRoute, routeRoute, stageRoute, fnRoute, typeRoute, rpcRoute, rpcMethodRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  groupRoute,
+  routeRoute,
+  stageRoute,
+  fnRoute,
+  typeRoute,
+  rpcRoute,
+  rpcMethodRoute,
+])
 
 const router = createRouter({ routeTree, history: createHashHistory() })
 

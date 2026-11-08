@@ -1,6 +1,6 @@
-import type { FuncFlow, Input, Step } from '../lib/types'
 import { fnHref } from '../lib/data'
 import { codesLabel, codesOf } from '../lib/status'
+import type { FuncFlow, Input, Step } from '../lib/types'
 import type { Scene, SEdge, SNode } from './scenes'
 
 const GAP = 88
@@ -172,12 +172,26 @@ export function buildFlowScene(
         kind,
         title: jump ? s.t : titleOf(s),
         sub: jump ? `next · ${jump.label}` : s.s,
-        badge: jump ? 'jump' : badge !== undefined ? badge : kind === 'exit' ? (codesLabel(s) ? `${codesLabel(s)} out` : 'exits') : s.g ? s.g : undefined,
+        badge: jump
+          ? 'jump'
+          : badge !== undefined
+            ? badge
+            : kind === 'exit'
+              ? codesLabel(s)
+                ? `${codesLabel(s)} out`
+                : 'exits'
+              : s.g
+                ? s.g
+                : undefined,
         tags: kind === 'exit' && s.g ? [s.g] : undefined,
         rk: kind === 'exit' ? s.rk : undefined,
         index: idx,
         jump: Boolean(jump),
-        href: jump ? jump.href : s.fk ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined) : undefined,
+        href: jump
+          ? jump.href
+          : s.fk
+            ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined)
+            : undefined,
         line: s.l,
         lines: s.ls && s.ls.length > 1 ? s.ls : s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,
@@ -192,23 +206,34 @@ export function buildFlowScene(
   const addReturn = (s: Step, y: number, idx: number): string => {
     const id = nextId()
     const label = codesLabel(s)
-    const retSub = s.rk ? (label ? `${label} · ${s.rk} return` : `${s.rk} return`) : label || 'return'
+    const retSub = s.rk
+      ? label
+        ? `${label} · ${s.rk} return`
+        : `${s.rk} return`
+      : label || 'return'
     // one code stays a circle; several widen it into a pill that still fits the text
     const w = Math.max(RET_W, 14 + label.length * 6.2)
     nodes.push(
-      card(id, RAIL_X, y + RET_DY, {
-        kind: 'return',
-        title: s.t || 'return',
-        badge: label,
-        sub: retSub,
-        index: idx,
-        href: s.fk ? fnHref(s.fk) : undefined,
-        line: s.l,
-        lines: s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
-        startLine,
-        file: s.f ?? flow.f,
-        source: true,
-      }, w, RET_W),
+      card(
+        id,
+        RAIL_X,
+        y + RET_DY,
+        {
+          kind: 'return',
+          title: s.t || 'return',
+          badge: label,
+          sub: retSub,
+          index: idx,
+          href: s.fk ? fnHref(s.fk) : undefined,
+          line: s.l,
+          lines: s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
+          startLine,
+          file: s.f ?? flow.f,
+          source: true,
+        },
+        w,
+        RET_W,
+      ),
     )
     place(id, RAIL_X, y + RET_DY, w, RET_W, 'return')
     codeOf.set(id, label)
@@ -238,7 +263,17 @@ export function buildFlowScene(
   }
 
   const addInputs = (list: Input[], last: string | null): string | null => {
-    type Group = { key: string; access: string; kind: string; via: string; file: string; names: string[]; line: number; last: number; lines: number[] }
+    type Group = {
+      key: string
+      access: string
+      kind: string
+      via: string
+      file: string
+      names: string[]
+      line: number
+      last: number
+      lines: number[]
+    }
     const cards = nodes.filter((n) => {
       const k = (n.data as { kind?: string }).kind
       return k === 'call' || k === 'note' || k === 'loop' || k === 'exit'
@@ -259,13 +294,11 @@ export function buildFlowScene(
     const groups: Group[] = []
     for (const x of list) {
       if (x.a !== 'read' && x.a !== 'set' && x.a !== 'read+set' && x.a !== 'dynamic') continue
-      const via = x.a === 'set' ? (x.si ?? '') : x.a === 'read' ? (x.ri ?? '') : (x.si || x.ri || '')
-      const ats =
-        x.a === 'set'
-          ? (x.sas && x.sas.length ? x.sas : x.sa ? [x.sa] : [])
-          : [x.ra]
+      const via = x.a === 'set' ? (x.si ?? '') : x.a === 'read' ? (x.ri ?? '') : x.si || x.ri || ''
+      const ats = x.a === 'set' ? (x.sas && x.sas.length ? x.sas : x.sa ? [x.sa] : []) : [x.ra]
       let pending = ats.map((at) => Number((at ?? '').split(':').pop())).filter((line) => line > 0)
-      const file = ats.map((at) => (at ?? '').slice(0, (at ?? '').lastIndexOf(':'))).find(Boolean) ?? ''
+      const file =
+        ats.map((at) => (at ?? '').slice(0, (at ?? '').lastIndexOf(':'))).find(Boolean) ?? ''
       // a direct c.Set/SetCookie has its own call card: tag that line instead
       // of drawing the same write twice. a key can be written in more than one
       // place (branch and tail), so tag every write we found.
@@ -273,7 +306,9 @@ export function buildFlowScene(
         const unmatched: number[] = []
         for (const line of pending) {
           const write = cards.find(
-            (n) => linesOfNode(n).includes(line) && /\.(Set|SetCookie|Add|Header)\(/.test(titleOfNode(n)),
+            (n) =>
+              linesOfNode(n).includes(line) &&
+              /\.(Set|SetCookie|Add|Header)\(/.test(titleOfNode(n)),
           )
           if (write) tagNode(write, `${x.k}:${x.n}`)
           else unmatched.push(line)
@@ -292,7 +327,17 @@ export function buildFlowScene(
           break
         }
         if (!g) {
-          g = { key, access: x.a, kind: x.k, via, file, names: [], line: Number.isFinite(line) ? line : 0, last: 0, lines: [] }
+          g = {
+            key,
+            access: x.a,
+            kind: x.k,
+            via,
+            file,
+            names: [],
+            line: Number.isFinite(line) ? line : 0,
+            last: 0,
+            lines: [],
+          }
           groups.push(g)
         }
         if (!g.file) g.file = file
@@ -326,8 +371,8 @@ export function buildFlowScene(
       const hot = String(gid)
       const leaf = g.via.slice(g.via.lastIndexOf('.') + 1)
       const anchor = g.via
-        ? cards.find((n) => titleOfNode(n).includes(g.via + '(')) ??
-          cards.find((n) => titleOfNode(n).includes(leaf + '('))
+        ? (cards.find((n) => titleOfNode(n).includes(g.via + '(')) ??
+          cards.find((n) => titleOfNode(n).includes(leaf + '(')))
         : undefined
       // the access happens inside the helper, so the call card gets a tag
       // instead of a second box beside the flow
@@ -366,18 +411,26 @@ export function buildFlowScene(
       shiftBelow(y, INPUT_GAP)
       const id = nextId()
       nodes.push(
-        card(id, x, y, {
-          kind: 'input',
-          title: g.names.length === 1 ? `${g.kind}:${g.names[0]}` : `${g.kind} ×${g.names.length}`,
-          sub: `${g.access} · ${g.via || flow.n || 'this function'}`,
-          access: g.access,
-          input: hot,
-          line: g.line,
-          lines: g.lines,
-          startLine,
-          file: g.file || flow.f,
-          source: true,
-        }, SPINE_W, INPUT_H),
+        card(
+          id,
+          x,
+          y,
+          {
+            kind: 'input',
+            title:
+              g.names.length === 1 ? `${g.kind}:${g.names[0]}` : `${g.kind} ×${g.names.length}`,
+            sub: `${g.access} · ${g.via || flow.n || 'this function'}`,
+            access: g.access,
+            input: hot,
+            line: g.line,
+            lines: g.lines,
+            startLine,
+            file: g.file || flow.f,
+            source: true,
+          },
+          SPINE_W,
+          INPUT_H,
+        ),
       )
       place(id, x, y, SPINE_W, INPUT_H, 'input')
 
@@ -551,7 +604,8 @@ export function buildFlowScene(
       // c.Set block: one card, all source lines, one tag per key
       if (s.k === 'call' && s.s === 'context write') {
         let j = i
-        while (j + 1 < list.length && list[j + 1].k === 'call' && list[j + 1].s === 'context write') j++
+        while (j + 1 < list.length && list[j + 1].k === 'call' && list[j + 1].s === 'context write')
+          j++
         if (j > i) {
           const run = list.slice(i, j + 1)
           const base = s.t.includes('(') ? s.t.slice(0, s.t.indexOf('(')) : s.t
@@ -593,13 +647,20 @@ export function buildFlowScene(
     if (cont) {
       const id = nextId()
       nodes.push(
-        card(id, 0, y, {
-          kind: 'note',
-          title: `next · ${cont.label}`,
-          sub: 'continue to the next filter on this request',
-          badge: 'jump',
-          href: cont.href,
-        }, SPINE_W, 60),
+        card(
+          id,
+          0,
+          y,
+          {
+            kind: 'note',
+            title: `next · ${cont.label}`,
+            sub: 'continue to the next filter on this request',
+            badge: 'jump',
+            href: cont.href,
+          },
+          SPINE_W,
+          60,
+        ),
       )
       place(id, 0, y, SPINE_W, 60, 'note')
       // the default path leaves the last spine node and continues to next
@@ -618,12 +679,25 @@ export function buildFlowScene(
   }
 
   if (nodes.length) {
-    nodes.unshift(card('lh', 0, -42, { kind: 'label', title: 'calls', w: SPINE_W, h: 18 }, SPINE_W, 18))
+    nodes.unshift(
+      card('lh', 0, -42, { kind: 'label', title: 'calls', w: SPINE_W, h: 18 }, SPINE_W, 18),
+    )
     if (nodes.some((x) => x.position.x <= RAIL_X)) {
-      nodes.unshift(card('lh2', RAIL_X, -42, { kind: 'label', title: 'returns', w: 120, h: 18 }, 120, 18))
+      nodes.unshift(
+        card('lh2', RAIL_X, -42, { kind: 'label', title: 'returns', w: 120, h: 18 }, 120, 18),
+      )
     }
     if (nodes.some((x) => x.position.x >= COL_W)) {
-      nodes.unshift(card('lh3', COL_W, -42, { kind: 'label', title: 'true branch', w: SPINE_W, h: 18 }, SPINE_W, 18))
+      nodes.unshift(
+        card(
+          'lh3',
+          COL_W,
+          -42,
+          { kind: 'label', title: 'true branch', w: SPINE_W, h: 18 },
+          SPINE_W,
+          18,
+        ),
+      )
     }
   }
 
@@ -632,13 +706,20 @@ export function buildFlowScene(
     const id = nextId()
     const y = -118
     nodes.push(
-      card(id, 0, y, {
-        kind: 'note',
-        title: `prev · ${prev.label}`,
-        sub: 'from the previous filter on this request',
-        badge: 'jump',
-        href: prev.href,
-      }, SPINE_W, 60),
+      card(
+        id,
+        0,
+        y,
+        {
+          kind: 'note',
+          title: `prev · ${prev.label}`,
+          sub: 'from the previous filter on this request',
+          badge: 'jump',
+          href: prev.href,
+        },
+        SPINE_W,
+        60,
+      ),
     )
     place(id, 0, y, SPINE_W, 60, 'note')
   }
