@@ -176,15 +176,17 @@ export function buildFlowScene(
           ? 'jump'
           : badge !== undefined
             ? badge
-            : kind === 'exit'
-              ? codesLabel(s)
-                ? `${codesLabel(s)} out`
-                : 'exits'
-              : kind === 'call'
-                ? codesLabel(s) || s.g
-                : s.g
-                  ? s.g
-                  : undefined,
+            : s.impls?.length
+              ? `${s.impls.length} impls`
+              : kind === 'exit'
+                ? codesLabel(s)
+                  ? `${codesLabel(s)} out`
+                  : 'exits'
+                : kind === 'call'
+                  ? codesLabel(s) || s.g
+                  : s.g
+                    ? s.g
+                    : undefined,
         tags:
           kind === 'exit'
             ? s.g
@@ -203,6 +205,7 @@ export function buildFlowScene(
             : s.fk
               ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined)
               : undefined,
+        impls: s.impls?.map((im) => ({ n: im.n, r: im.r, p: im.p, href: fnHref(im.k, origin) })),
         line: s.l,
         lines: s.ls && s.ls.length > 1 ? s.ls : s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,

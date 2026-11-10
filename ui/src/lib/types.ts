@@ -189,6 +189,15 @@ export type Service = {
   methods: ServiceMethod[]
 }
 
+export type Impl = {
+  k: string
+  n: string
+  r?: string
+  p?: string
+  f?: string
+  l?: number
+}
+
 export type Step = {
   k: 'call' | 'exit' | 'if' | 'loop' | 'switch' | 'ret' | 'note' | 'continue'
   t: string
@@ -208,6 +217,7 @@ export type Step = {
   b?: Step[]
   e?: Step[]
   rpc?: string
+  impls?: Impl[]
 }
 
 export type FuncFlow = {

@@ -837,6 +837,9 @@ func (w *Walker) ref(f *Func, e ast.Expr) (Ref, bool) {
 			return Ref{Name: base + "." + x.Sel.Name, Kind: "expr", File: f.File, Line: line(x.Pos())}, true
 		}
 		if ms := w.m.Methods[x.Sel.Name]; len(ms) > 0 {
+			if fn := w.methodFor(f, x); fn != nil {
+				return Ref{Name: x.Sel.Name, Kind: "method", File: fn.File, Line: fn.Start, Fn: fn}, true
+			}
 			fn := ms[0]
 			return Ref{Name: x.Sel.Name, Kind: "method", File: fn.File, Line: fn.Start, Fn: fn}, true
 		}
@@ -861,6 +864,9 @@ func (w *Walker) ref(f *Func, e ast.Expr) (Ref, bool) {
 				}
 			}
 			if ms := w.m.Methods[sel.Sel.Name]; len(ms) > 0 {
+				if fn := w.methodFor(f, sel); fn != nil {
+					return Ref{Name: sel.Sel.Name, Kind: "method", File: fn.File, Line: fn.Start, Fn: fn}, true
+				}
 				fn := ms[0]
 				return Ref{Name: sel.Sel.Name, Kind: "method", File: fn.File, Line: fn.Start, Fn: fn}, true
 			}
@@ -880,6 +886,22 @@ func (w *Walker) resolveAny(f *Func, e ast.Expr) *Func {
 		return w.resolveAny(f, x.Fun)
 	case *ast.ParenExpr:
 		return w.resolveAny(f, x.X)
+	}
+	return nil
+}
+
+// methodFor resolves a method value by the declared type of its receiver, so a
+// handler received as a parameter (userHandler *JobHandler) lands on that type's
+// method instead of the first method with the same name in the module.
+func (w *Walker) methodFor(f *Func, sel *ast.SelectorExpr) *Func {
+	typ := w.localType(f, identName(sel.X))
+	if typ == "" {
+		return nil
+	}
+	for _, fn := range w.m.Methods[sel.Sel.Name] {
+		if fn.Recv == typ {
+			return fn
+		}
 	}
 	return nil
 }
@@ -914,6 +936,22 @@ func (w *Walker) localType(f *Func, name string) string {
 	if m := w.types[f.Key]; m != nil {
 		if t, ok := m[name]; ok {
 			return t
+		}
+	}
+	if f.Decl != nil && f.Decl.Type != nil && f.Decl.Type.Params != nil {
+		for _, p := range f.Decl.Type.Params.List {
+			for _, n := range p.Names {
+				if n.Name == name {
+					typ := shortType(p.Type)
+					cache := w.types[f.Key]
+					if cache == nil {
+						cache = map[string]string{}
+						w.types[f.Key] = cache
+					}
+					cache[name] = typ
+					return typ
+				}
+			}
 		}
 	}
 	cache := w.types[f.Key]

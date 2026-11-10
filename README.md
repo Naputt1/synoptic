@@ -29,9 +29,10 @@ Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Descrip
 ## How it reads the code
 
 - `load.go` parses the module (AST, imports, doc comments) and indexes every func with its calls. Nested `go.mod` files are respected, so a microservice workspace with one module per service resolves across them.
-- `routes.go` walks the route registration: `gin`, `fiber`, `chi`, `gorilla/mux`, `net/http`, `echo`, including groups registered in other functions, middleware added with `Use`, handler factories called inline (`app.Get("/x", Activities(*u))`), factories stored in a variable, and `.PathPrefix(...).Subrouter()` / `.Methods(...)`.
-- `flow.go` turns a function body into steps: calls, exits (an `if` whose body only returns), loops, switches, repeated calls folded to `×n`.
+- `routes.go` walks the route registration: `gin`, `fiber`, `chi`, `gorilla/mux`, `net/http`, `echo`, including groups registered in other functions, middleware added with `Use`, handler factories called inline (`app.Get("/x", Activities(*u))`), factories stored in a variable, and `.PathPrefix(...).Subrouter()` / `.Methods(...)`. Method values resolve through the receiver's declared type, including constructor parameters, so a same-named method elsewhere is not picked by mistake.
+- `flow.go` turns a function body into steps: calls, exits (an `if` whose body only returns), loops, switches, repeated calls folded to `×n`. An interface call resolves only when a concrete type implements every interface method with a matching signature; when several do, the step offers a chooser.
 - `grpc.go` reads `Register<Service>Server` calls and the generated `_ServiceDesc`, then resolves the implementation and its interceptor chain for the RPC tab.
+- `deps.go` groups the parsed files by import path, reads the `go.mod` requirements, and attributes each package to the entry points whose imports reach it.
 - `render.go` builds the JSON and inlines it into `ui/dist/index.html`.
 
 The UI is React + TanStack Router + React Flow + shadcn-style primitives; the build is a single HTML file (no assets, no network).

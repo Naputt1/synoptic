@@ -4,6 +4,7 @@ import { memo } from 'react'
 
 import { AppLink } from '../components/ui/link'
 import { absoluteLink } from '../lib/actions'
+import { goto } from '../lib/nav'
 import { statusBadgeTone, type StatusTone, statusTone } from '../lib/status'
 import { CardMenu } from './NodeMenu'
 import type { SData, SNode } from './scenes'
@@ -365,7 +366,30 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           )}
         </div>
 
-        {(d.sub || (d.tags && d.tags.length > 0) || isStage) && (
+        {d.impls?.length ? (
+          <select
+            className="nodrag nopan border-line bg-canvas text-ink mt-1 w-full cursor-pointer rounded-[3px] border px-1 py-0.5 text-[10px] outline-none"
+            defaultValue=""
+            aria-label={`choose one of ${d.impls.length} implementations of ${d.title}`}
+            title={`${d.impls.length} implementations`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => {
+              const to = e.currentTarget.value
+              if (to) goto(to)
+            }}
+          >
+            <option value="">choose implementation…</option>
+            {d.impls.map((im) => (
+              <option key={im.href} value={im.href}>
+                {im.r ? `${im.r}.` : ''}
+                {im.n} · {im.p}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
+        {!d.impls?.length && (d.sub || (d.tags && d.tags.length > 0) || isStage) && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {d.sub && (
               <span className="text-mut min-w-0 flex-1 truncate text-[10.5px]" title={d.sub}>

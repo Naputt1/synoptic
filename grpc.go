@@ -709,7 +709,7 @@ func attachServices(m *Module, d *JData, services []JService) {
 		d.Types = buildTypeCatalog(m)
 	}
 	for key, jf := range d.Flows {
-		annotateSteps(jf.Steps, d.Types)
+		annotateSteps(jf.Steps, d.Types, m)
 		linkRPSSteps(jf.Steps, ifaceRPC)
 		if ref, ok := fkRPC[key]; ok {
 			jf.Rpc = ref

@@ -189,7 +189,7 @@ func buildData(m *Module, routes []*Route) JData {
 	d.Types = types
 	d.Deps = buildDeps(m)
 	for key, jf := range d.Flows {
-		annotateSteps(jf.Steps, d.Types)
+		annotateSteps(jf.Steps, d.Types, m)
 		d.Flows[key] = jf
 	}
 	d.Stats.Funcs = len(d.Flows)
@@ -262,6 +262,12 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 	for _, c := range fn.Calls {
 		if c.Target != nil {
 			indexFunc(m, flows, c.Target, depth+1)
+		} else if c.IfaceKey != "" && c.Sel != "" {
+			// An ambiguous interface call has no single target. Bake every full
+			// implementation so the chooser can open each one.
+			for _, impl := range m.implementers(c.IfaceKey, c.Sel, fn) {
+				indexFunc(m, flows, impl, depth+1)
+			}
 		}
 	}
 }

@@ -21,14 +21,15 @@ type FileCtx struct {
 }
 
 type Call struct {
-	Base    string // first identifier of the chain, e.g. "config" in config.DB.Table
-	Qual    string // receiver expression, e.g. "s.userStatusService" in s.userStatusService.GetUser
-	Sel     string // last identifier, e.g. "Table"
-	Expr    string // full chain as written
-	Iface   string // declared type of the field the call goes through, when that field is not a struct
-	Line    int
-	PkgPath string
-	Target  *Func
+	Base     string // first identifier of the chain, e.g. "config" in config.DB.Table
+	Qual     string // receiver expression, e.g. "s.userStatusService" in s.userStatusService.GetUser
+	Sel      string // last identifier, e.g. "Table"
+	Expr     string // full chain as written
+	Iface    string // declared type of the field the call goes through, when that field is not a struct
+	IfaceKey string // "pkg|Interface" for Iface, when it resolves to a type
+	Line     int
+	PkgPath  string
+	Target   *Func
 }
 
 type Func struct {
@@ -55,17 +56,18 @@ type FieldRef struct {
 }
 
 type Module struct {
-	Root    string
-	Path    string
-	Name    string
-	Files   []*FileCtx
-	Funcs   map[string]*Func
-	PKG     map[string]map[string]*Func    // pkgPath -> name -> package level func
-	Methods map[string][]*Func             // method name -> every method with that name
-	ByRecv  map[string][]*Func             // receiver type -> methods
-	Fields  map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
-	Ifaces  map[string][]string            // "pkg|Interface" -> exported method names
-	PkgDocs map[string]string
+	Root      string
+	Path      string
+	Name      string
+	Files     []*FileCtx
+	Funcs     map[string]*Func
+	PKG       map[string]map[string]*Func    // pkgPath -> name -> package level func
+	Methods   map[string][]*Func             // method name -> every method with that name
+	ByRecv    map[string][]*Func             // receiver type -> methods
+	Fields    map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
+	Ifaces    map[string][]string            // "pkg|Interface" -> exported method names
+	IfaceSigs map[string]map[string]string   // "pkg|Interface" -> method -> canonical signature
+	PkgDocs   map[string]string
 }
 
 var skipDirs = map[string]bool{
@@ -80,14 +82,15 @@ func loadModule(root string) (*Module, error) {
 		return nil, err
 	}
 	m := &Module{
-		Root:    abs,
-		Funcs:   map[string]*Func{},
-		PKG:     map[string]map[string]*Func{},
-		Methods: map[string][]*Func{},
-		ByRecv:  map[string][]*Func{},
-		Fields:  map[string]map[string]FieldRef{},
-		Ifaces:  map[string][]string{},
-		PkgDocs: map[string]string{},
+		Root:      abs,
+		Funcs:     map[string]*Func{},
+		PKG:       map[string]map[string]*Func{},
+		Methods:   map[string][]*Func{},
+		ByRecv:    map[string][]*Func{},
+		Fields:    map[string]map[string]FieldRef{},
+		Ifaces:    map[string][]string{},
+		IfaceSigs: map[string]map[string]string{},
+		PkgDocs:   map[string]string{},
 	}
 	modPath, modName := readGoMod(abs)
 	m.Path, m.Name = modPath, modName
@@ -163,15 +166,24 @@ func loadModule(root string) (*Module, error) {
 					}
 					if it, ok := ts.Type.(*ast.InterfaceType); ok {
 						var names []string
+						sigs := map[string]string{}
 						for _, mth := range it.Methods.List {
+							ft, ok := mth.Type.(*ast.FuncType)
+							if !ok {
+								continue
+							}
+							sig := canonicalSig(fc, ft)
 							for _, n := range mth.Names {
 								if n.IsExported() {
 									names = append(names, n.Name)
+									sigs[n.Name] = sig
 								}
 							}
 						}
 						if len(names) > 0 {
-							m.Ifaces[fc.PkgPath+"|"+ts.Name.Name] = names
+							key := fc.PkgPath + "|" + ts.Name.Name
+							m.Ifaces[key] = names
+							m.IfaceSigs[key] = sigs
 						}
 						continue
 					}
@@ -275,6 +287,7 @@ func (m *Module) callsOf(f *Func) []Call {
 			field := c.Qual[len(f.RecvVar)+1:]
 			if ref, ok := m.Fields[f.PkgPath+"|"+f.Recv][field]; ok {
 				c.Iface = ref.Text
+				c.IfaceKey = ref.Pkg + "|" + ref.Name
 				if fn := m.methodOn(ref.Pkg, ref.Name, c.Sel); fn != nil {
 					c.Target = fn
 					c.PkgPath = fn.PkgPath
@@ -338,17 +351,29 @@ func typeRef(file *FileCtx, typeText string) (string, string) {
 }
 
 // ifaceImpl finds the method sel on the one concrete type that declares every
-// method of the interface: the receiver an interface call reaches when there is
-// exactly one, as with a repository interface and its store. Generated stubs
-// are skipped, and an ambiguous interface resolves to nothing.
+// method of the interface with a compatible signature: the receiver an
+// interface call reaches when there is exactly one, as with a repository
+// interface and its store. Generated stubs are skipped, and an ambiguous
+// interface resolves to nothing; use implementers to list the choices.
 func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
-	ms, ok := m.Ifaces[pkgPath+"|"+name]
-	if !ok {
+	impls := m.implementers(pkgPath+"|"+name, sel, self)
+	if len(impls) == 1 {
+		return impls[0]
+	}
+	return nil
+}
+
+// implementers returns every concrete type whose method set fully satisfies the
+// interface and which declares sel. Multiple results mean the caller must ask
+// the user rather than guess.
+func (m *Module) implementers(ifaceKey, sel string, self *Func) []*Func {
+	if len(m.IfaceSigs[ifaceKey]) == 0 || sel == "" {
 		return nil
 	}
-	var match *Func
+	var out []*Func
+	seen := map[string]bool{}
 	for _, fn := range m.Methods[sel] {
-		if fn.Recv == "" || !m.declaresAll(fn.PkgPath, fn.Recv, ms) {
+		if fn.Recv == "" || !m.implements(ifaceKey, fn.PkgPath, fn.Recv) {
 			continue
 		}
 		// the caller's own method is not an implementation of its field's interface
@@ -358,20 +383,37 @@ func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
 		if generatedOnly(m.recvMethods(fn.PkgPath, fn.Recv)) {
 			continue
 		}
-		if match != nil {
-			return nil // more than one implementation: do not guess
+		id := fn.PkgPath + "|" + fn.Recv
+		if seen[id] {
+			continue
 		}
-		match = fn
+		seen[id] = true
+		out = append(out, fn)
 	}
-	return match
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].PkgPath != out[j].PkgPath {
+			return out[i].PkgPath < out[j].PkgPath
+		}
+		return out[i].Recv < out[j].Recv
+	})
+	return out
 }
 
-// declaresAll reports whether the type has a method for every name.
-func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
-	for _, n := range names {
+// implements reports whether the type has a method with the exact signature for
+// every method of the interface. Method names alone are not enough: a same-named
+// method with different parameters or results does not satisfy the interface.
+func (m *Module) implements(ifaceKey, pkgPath, recv string) bool {
+	sigs := m.IfaceSigs[ifaceKey]
+	if len(sigs) == 0 {
+		return false
+	}
+	for name, want := range sigs {
 		found := false
-		for _, fn := range m.Methods[n] {
-			if fn.PkgPath == pkgPath && fn.Recv == recv {
+		for _, fn := range m.Methods[name] {
+			if fn.PkgPath != pkgPath || fn.Recv != recv || fn.Decl == nil {
+				continue
+			}
+			if canonicalSig(fn.File, fn.Decl.Type) == want {
 				found = true
 				break
 			}
@@ -381,6 +423,96 @@ func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
 		}
 	}
 	return true
+}
+
+var builtinTypes = map[string]bool{
+	"any": true, "bool": true, "byte": true, "comparable": true,
+	"complex64": true, "complex128": true, "error": true, "float32": true,
+	"float64": true, "int": true, "int8": true, "int16": true, "int32": true,
+	"int64": true, "rune": true, "string": true, "uint": true, "uint8": true,
+	"uint16": true, "uint32": true, "uint64": true, "uintptr": true,
+}
+
+// canonicalSig renders a function signature with every named type qualified by
+// its package path, so aliases in different files compare equal.
+func canonicalSig(fc *FileCtx, ft *ast.FuncType) string {
+	if ft == nil {
+		return ""
+	}
+	var params, results []string
+	if ft.Params != nil {
+		for _, f := range ft.Params.List {
+			t := canonicalType(fc, f.Type)
+			for range max(1, len(f.Names)) {
+				params = append(params, t)
+			}
+		}
+	}
+	if ft.Results != nil {
+		for _, f := range ft.Results.List {
+			t := canonicalType(fc, f.Type)
+			for range max(1, len(f.Names)) {
+				results = append(results, t)
+			}
+		}
+	}
+	s := "(" + strings.Join(params, ", ") + ")"
+	if len(results) == 1 {
+		s += " " + results[0]
+	} else if len(results) > 1 {
+		s += " (" + strings.Join(results, ", ") + ")"
+	}
+	return s
+}
+
+func canonicalType(fc *FileCtx, e ast.Expr) string {
+	switch x := e.(type) {
+	case *ast.Ident:
+		if builtinTypes[x.Name] {
+			return x.Name
+		}
+		return fc.PkgPath + "." + x.Name
+	case *ast.SelectorExpr:
+		base := identName(x.X)
+		if p, ok := fc.Imports[base]; ok {
+			return p + "." + x.Sel.Name
+		}
+		return canonicalType(fc, x.X) + "." + x.Sel.Name
+	case *ast.StarExpr:
+		return "*" + canonicalType(fc, x.X)
+	case *ast.ArrayType:
+		if x.Len == nil {
+			return "[]" + canonicalType(fc, x.Elt)
+		}
+		return "[" + typeString(x.Len) + "]" + canonicalType(fc, x.Elt)
+	case *ast.MapType:
+		return "map[" + canonicalType(fc, x.Key) + "]" + canonicalType(fc, x.Value)
+	case *ast.ChanType:
+		dir := "chan "
+		if x.Dir == ast.RECV {
+			dir = "<-chan "
+		} else if x.Dir == ast.SEND {
+			dir = "chan<- "
+		}
+		return dir + canonicalType(fc, x.Value)
+	case *ast.Ellipsis:
+		return "..." + canonicalType(fc, x.Elt)
+	case *ast.ParenExpr:
+		return canonicalType(fc, x.X)
+	case *ast.IndexExpr:
+		return canonicalType(fc, x.X) + "[" + canonicalType(fc, x.Index) + "]"
+	case *ast.IndexListExpr:
+		var args []string
+		for _, a := range x.Indices {
+			args = append(args, canonicalType(fc, a))
+		}
+		return canonicalType(fc, x.X) + "[" + strings.Join(args, ", ") + "]"
+	case *ast.FuncType:
+		return "func" + canonicalSig(fc, x)
+	case *ast.InterfaceType:
+		return "interface{}"
+	}
+	return typeString(e)
 }
 
 // recvMethods collects every method declared on a type.

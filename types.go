@@ -98,7 +98,7 @@ func buildTypeCatalog(m *Module) map[string]JType {
 			continue
 		}
 		for skey, st := range out {
-			if st.K != "struct" || !covers(iface.Methods, st.Methods) {
+			if st.K != "struct" || !m.implements(ikey, st.Pkg, st.N) {
 				continue
 			}
 			iface.Impls = append(iface.Impls, skey)
@@ -231,7 +231,17 @@ func matchingParen(s string, at int) int {
 }
 
 // annotateStep adds the struct and interface context to a service method call.
-func annotateStep(s *Step, types map[string]JType) {
+func annotateStep(s *Step, types map[string]JType, m *Module) {
+	if s.IfaceKey != "" && s.Key == "" {
+		impls := m.implementers(s.IfaceKey, s.Sel, nil)
+		if len(impls) > 1 {
+			s.Ik = s.IfaceKey
+			s.Impls = make([]JImpl, 0, len(impls))
+			for _, fn := range impls {
+				s.Impls = append(s.Impls, JImpl{K: fn.Key, N: fn.Name, R: fn.Recv, P: fn.PkgPath, F: fn.File.Rel, L: fn.Start})
+			}
+		}
+	}
 	if s.Key == "" {
 		return
 	}
@@ -250,8 +260,8 @@ func annotateStep(s *Step, types map[string]JType) {
 		if !ok {
 			continue
 		}
-		for _, m := range iface.Methods {
-			if m.N == parts[2] {
+		for _, im := range iface.Methods {
+			if im.N == parts[2] {
 				s.Ik = ik
 				return
 			}
@@ -259,10 +269,10 @@ func annotateStep(s *Step, types map[string]JType) {
 	}
 }
 
-func annotateSteps(list []Step, types map[string]JType) {
+func annotateSteps(list []Step, types map[string]JType, m *Module) {
 	for i := range list {
-		annotateStep(&list[i], types)
-		annotateSteps(list[i].Body, types)
-		annotateSteps(list[i].Else, types)
+		annotateStep(&list[i], types, m)
+		annotateSteps(list[i].Body, types, m)
+		annotateSteps(list[i].Else, types, m)
 	}
 }

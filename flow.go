@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+// JImpl is one concrete type that fully implements an interface a call goes
+// through. The UI presents these as choices instead of guessing.
+type JImpl struct {
+	K string `json:"k"`
+	N string `json:"n"`
+	R string `json:"r,omitempty"`
+	P string `json:"p,omitempty"`
+	F string `json:"f,omitempty"`
+	L int    `json:"l,omitempty"`
+}
+
 // Step is one box in a function's code flow: a call that matters, a branch that
 // changes where control goes, or the way out. Assignments and defer are not steps.
 type Step struct {
@@ -29,10 +40,12 @@ type Step struct {
 	Count   int      `json:"c,omitempty"`
 	Body    []Step   `json:"b,omitempty"`
 	Else    []Step   `json:"e,omitempty"`
+	Impls   []JImpl  `json:"impls,omitempty"`
 
-	Rpc   string `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
-	Iface string `json:"-"`             // declared type of the field the call goes through
-	Sel   string `json:"-"`             // method name on that field
+	Rpc      string `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
+	Iface    string `json:"-"`             // declared type of the field the call goes through
+	IfaceKey string `json:"-"`             // "pkg|Interface" for Iface
+	Sel      string `json:"-"`             // method name on that field
 }
 
 func buildFlow(f *Func) []Step {
@@ -137,6 +150,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 						st.Tag = cs.Tag
 						st.Key = cs.Key
 						st.Iface = cs.Iface
+						st.IfaceKey = cs.IfaceKey
 						st.Sel = cs.Sel
 						st.File = cs.File
 						st.Line = cs.Line
@@ -218,6 +232,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 							c = resolved
 						}
 						st.Iface = c.Iface
+						st.IfaceKey = c.IfaceKey
 						st.Sel = c.Sel
 						if strings.HasSuffix(c.Iface, "Client") {
 							st.Tag = "rpc"
@@ -265,6 +280,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 							ex.Tag = cs.Tag
 							ex.Key = cs.Key
 							ex.Iface = cs.Iface
+							ex.IfaceKey = cs.IfaceKey
 							ex.Sel = cs.Sel
 							ex.File = cs.File
 							ex.Line = cs.Line
@@ -279,7 +295,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 					// the call and the condition together, then show its body
 					if refersTo(next.Cond, guardNames(x.Lhs, next.Cond)) {
 						if cs := callStep(f, x.Rhs[0], calls); cs.Kind == "call" {
-							st := Step{Kind: "if", Text: cs.Text, Sub: "if " + exprText(next.Cond), Tag: cs.Tag, Key: cs.Key, Iface: cs.Iface, Sel: cs.Sel, File: cs.File, Line: cs.Line, SubLine: line(next.Pos())}
+							st := Step{Kind: "if", Text: cs.Text, Sub: "if " + exprText(next.Cond), Tag: cs.Tag, Key: cs.Key, Iface: cs.Iface, IfaceKey: cs.IfaceKey, Sel: cs.Sel, File: cs.File, Line: cs.Line, SubLine: line(next.Pos())}
 							st.Body = flowSteps(f, next.Body.List)
 							if next.Else != nil {
 								switch e := next.Else.(type) {
@@ -410,7 +426,7 @@ func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
 		return Step{}
 	}
 
-	st := Step{Kind: "call", Text: exprText(ce), Tag: tag, Line: line(ce.Pos()), Iface: c.Iface, Sel: c.Sel}
+	st := Step{Kind: "call", Text: exprText(ce), Tag: tag, Line: line(ce.Pos()), Iface: c.Iface, IfaceKey: c.IfaceKey, Sel: c.Sel}
 	if c.Target != nil {
 		st.Sub = altPkg(c.Target.PkgPath)
 		st.File = f.File.Rel
@@ -655,6 +671,7 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 				st.Text = exprText(ce)
 				st.Tag = tagOf(c)
 				st.Iface = c.Iface
+				st.IfaceKey = c.IfaceKey
 				st.Sel = c.Sel
 				if c.Target != nil && c.Target.Key != "" {
 					st.Key = c.Target.Key
