@@ -34,10 +34,10 @@ type Step struct {
 	Errs    []int `json:"em,omitempty"`
 	SpanEnd int   `json:"se,omitempty"` // last source line the step covers
 
-	Rpc     string   `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
-	Writes  []string `json:"-"`             // response helpers called on this step's span
-	Iface   string   `json:"-"`             // declared type of the field the call goes through
-	Sel     string   `json:"-"`             // method name on that field
+	Rpc    string   `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
+	Writes []string `json:"-"`             // response helpers called on this step's span
+	Iface  string   `json:"-"`             // declared type of the field the call goes through
+	Sel    string   `json:"-"`             // method name on that field
 }
 
 func buildFlow(f *Func) []Step {

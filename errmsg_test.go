@@ -82,6 +82,11 @@ func handleF(c *Ctx) {
 	panic("handler exploded")
 }
 
+func handleG(c *Ctx) {
+	c.JSON(400, body{"error": "lookup failed: " + c.Cond().Error()})
+	log.Println("store lookup failed: " + c.Cond().Error())
+}
+
 func setup(r *Router) {
 	r.GET("/a", handleA)
 	r.GET("/b", handleB)
@@ -89,6 +94,7 @@ func setup(r *Router) {
 	r.GET("/d", handleD)
 	r.GET("/e", handleE)
 	r.GET("/f", handleF)
+	r.GET("/g", handleG)
 }
 `
 
@@ -136,6 +142,8 @@ func TestErrorsExtractMessagesAndStatuses(t *testing.T) {
 		{"cache miss", "log", nil},
 		{"failed to open store", "log", nil},
 		{"handler exploded", "panic", nil},
+		{"lookup failed: %v", "response", []string{"400"}},
+		{"store lookup failed: %v", "log", nil},
 	}
 	for _, tc := range cases {
 		e := findErr(d, tc.msg)
@@ -148,7 +156,7 @@ func TestErrorsExtractMessagesAndStatuses(t *testing.T) {
 		if strings.Join(e.C, ",") != strings.Join(tc.codes, ",") {
 			t.Errorf("%q codes = %v, want %v", tc.msg, e.C, tc.codes)
 		}
-		if tc.msg == "load %d: %w" && !e.X {
+		if (tc.msg == "load %d: %w" || strings.Contains(tc.msg, "%v")) && !e.X {
 			t.Errorf("%q not marked as a template", tc.msg)
 		}
 		if tc.msg == "invalid id" && e.D != "msg" {

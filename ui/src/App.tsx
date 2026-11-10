@@ -315,11 +315,11 @@ function Topbar({ onSearch, onTrace }: { onSearch: () => void; onTrace: () => vo
           variant="default"
           size="sm"
           onClick={onTrace}
-          title="trace a runtime error back to source"
+          title="paste logs and trace error messages back to source"
         >
           <Bug className="size-3" /> trace
           <kbd className="border-line text-faint ml-1 rounded-[3px] border px-1 text-[9.5px]">
-            ctrl J
+            ctrl ⇧ E
           </kbd>
         </Button>
         <Button variant="default" size="sm" onClick={onSearch}>
@@ -401,13 +401,15 @@ function Shell() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement | null)?.closest('input,textarea')
-      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'j') {
+      if (e.ctrlKey && e.shiftKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'e') {
         e.preventDefault()
+        setSearchOpen(false)
         setTraceOpen((v) => !v)
         return
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        setTraceOpen(false)
         setSearchOpen((v) => !v)
         return
       }
@@ -448,8 +450,8 @@ function Shell() {
           <Outlet />
         </div>
         <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
-          click any box to open it · right-click for actions · esc goes back · ⌘K searches · ctrl
-          J traces an error
+          click any box to open it · right-click for actions · esc goes back · ⌘K searches ·
+          ctrl+shift+E traces a log
         </div>
         {toast && (
           <div

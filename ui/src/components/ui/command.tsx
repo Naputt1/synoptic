@@ -193,7 +193,7 @@ export function SearchDialog({
               )}
               {!q.trim() && (
                 <div className="text-faint px-2 py-2 text-[11px]">
-                  type to search {pool} routes{svc ? ` in ${svc}` : ''} · ctrl J traces a runtime
+                  type to search {pool} routes{svc ? ` in ${svc}` : ''} · ctrl+shift+E traces a log
                   error
                 </div>
               )}

@@ -22,7 +22,7 @@ Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <f
 | **step** | the handler body as a flow: calls on the spine, `if err != nil` guards as exits with their status code, loops as `↺`, in-repo calls open their own flow. |
 | **code** | the raw source, when you want the exact lines. |
 
-Click a stage to open its flow. `⌘K` searches every route and stage, `Ctrl+J` traces a runtime error, and `esc` goes back. The URL holds the whole position (`#/r/0/s/3`), so a link to a middleware is a link.
+Click a stage to open its flow. `⌘K` searches every route and stage, `Ctrl+Shift+E` opens the log trace workbench, and `esc` goes back. The URL holds the whole position (`#/r/0/s/3`), so a link to a middleware is a link.
 
 Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Description` from swaggo when present. With no comment, the page says so and lets the flow be the description.
 
@@ -123,19 +123,25 @@ The analyzer indexes every error message the code can emit: response bodies
 (`gin.H{"error": …}`, `fiber.Map`, struct fields, `http.Error`, echo `e.Error`),
 project helpers that write a response (messages resolved through their
 parameters), `errors.New` / `fmt.Errorf` / `*.Errorf`, sentinel uses, structured
-logs, and `panic` arguments. Format strings are kept as templates (`%s`, `%w`,
-`%v`), not evaluated.
+logs, and `panic` arguments. Format strings and concatenated messages are kept
+as templates (`%s`, `%w`, `%v`), not evaluated.
 
 - **Preview on the flow.** Status circles and exit badges in a handler's flow
   carry the messages that leave through them. Hover one to see the status code,
   the message, and its `file:line` (up to five; the rest show a count).
-- **Paste a real error.** `Ctrl+J` opens a trace box separate from route search.
-  Paste a log line, JSON log, panic, or stack trace; enter opens the flow that
-  emits the message with the source line highlighted.
+- **Trace real logs.** `Ctrl+Shift+E` opens a full-screen workbench. Paste or
+  drop a log file; it reads JSON, NDJSON, logfmt, and plain lines with Go, zap,
+  zerolog, logrus, or std-log prefixes, keeps panic stacks and stack frames
+  attached to their record, and ignores timestamps and stack lines as match text.
+- **Grouped results.** Every source message is one row with its occurrence count,
+  levels, statuses, and sites. Expand a row to see each `file:line`, the best
+  site, and sample log lines; filter by message or file, show only errors, sort
+  by count/severity/recent order, or switch to **unknown** to inspect records that
+  did not match.
 - **Ambiguous messages.** The same text can be written in several places. The
-  trace picks the site from a stack frame's `file.go:line`, then a stack function
-  name, then a route path present in the paste; otherwise it opens the first site
-  and says how many others exist.
+  trace picks the site from a stack frame's `file.go:line`, then the status,
+  method, or route path present in the paste; otherwise it opens the most
+  frequent site and lists the rest.
 
 Bodies that are only `err.Error()` or another dynamic value have no literal to
 preview or match, and are left out rather than guessed. Paired with `-json`, the

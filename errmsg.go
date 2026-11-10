@@ -502,9 +502,91 @@ func (s *errScan) stringArg(e ast.Expr) (string, bool) {
 		if name == "string" && len(call.Args) == 1 {
 			return s.stringArg(call.Args[0])
 		}
-		return "", false
 	}
-	return s.literal(e)
+	if v, ok := s.literal(e); ok {
+		return v, true
+	}
+	// Values attached at runtime still leave the words around them searchable:
+	// `"lookup failed: " + err.Error()` becomes `lookup failed: %v`.
+	if v, ok := s.pattern(e); ok && patternHasText(v) {
+		return v, true
+	}
+	return "", false
+}
+
+// pattern renders the fixed parts of a runtime-built string and replaces each
+// unknown part with %v. It never invents words, so a bare err.Error() is not
+// indexed as a message.
+func (s *errScan) pattern(e ast.Expr) (string, bool) {
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if x.Kind == token.STRING {
+			if v, err := strconv.Unquote(x.Value); err == nil {
+				return v, true
+			}
+		}
+	case *ast.ParenExpr:
+		return s.pattern(x.X)
+	case *ast.BinaryExpr:
+		if x.Op == token.ADD {
+			a, aok := s.pattern(x.X)
+			b, bok := s.pattern(x.Y)
+			if !aok && !bok {
+				return "", false
+			}
+			if !aok {
+				a = "%v"
+			}
+			if !bok {
+				b = "%v"
+			}
+			return a + b, true
+		}
+	case *ast.CallExpr:
+		name := exprText(x.Fun)
+		if (name == "fmt.Sprintf" || strings.HasSuffix(name, ".Sprintf")) && len(x.Args) > 0 {
+			return s.pattern(x.Args[0])
+		}
+	case *ast.Ident:
+		if v, ok := s.consts[s.file.PkgPath+"|"+x.Name]; ok {
+			return v, true
+		}
+		if v, ok := s.locals[x.Name]; ok {
+			return v, true
+		}
+	case *ast.SelectorExpr:
+		if v, ok := literalString(x, s.consts, s.file); ok {
+			return v, true
+		}
+	}
+	return "%v", true
+}
+
+// patternHasText keeps patterns that contain real words. A message that is
+// only a placeholder (`%v`) cannot identify a source site.
+func patternHasText(s string) bool {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			b.WriteByte(s[i])
+			continue
+		}
+		j := i + 1
+		if j < len(s) && s[j] == '%' {
+			b.WriteByte('%')
+			i++
+			continue
+		}
+		for j < len(s) && strings.ContainsRune("+-# 0.123456789*[]", rune(s[j])) {
+			j++
+		}
+		if j < len(s) && ((s[j] >= 'a' && s[j] <= 'z') || (s[j] >= 'A' && s[j] <= 'Z')) {
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return len([]rune(strings.TrimSpace(b.String()))) >= 3
 }
 
 func (s *errScan) addSite(kind, msg string, tmpl bool, key string, codes map[string]bool, at token.Pos) {
@@ -650,7 +732,8 @@ func isErrorCtor(name string) bool {
 	return name == "errors.New" || name == "fmt.Errorf" || strings.HasSuffix(name, ".Errorf")
 }
 
-func isErrorLogCall(c Call) bool {	switch c.Sel {
+func isErrorLogCall(c Call) bool {
+	switch c.Sel {
 	case "Error", "Errorf", "Fatal", "Fatalf", "Panic", "Panicf", "Warn", "Warnf", "Warning", "Warningf":
 	case "Print", "Printf", "Println", "Panicln":
 		// std log has no level; its Print* calls still carry the message a

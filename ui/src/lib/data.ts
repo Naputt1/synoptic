@@ -58,6 +58,14 @@ export const errHref = (e: JErr, ref?: ErrRef): string | undefined => {
   return undefined
 }
 
+/** Resolve a route ref to the stage that actually holds the error's function. */
+export const errSiteHref = (d: Data, e: JErr, ref?: ErrRef): string | undefined => {
+  if (!ref || ref.k === 'rpc' || ref.si !== undefined) return errHref(e, ref)
+  const route = d.routes[ref.ri]
+  const stage = route?.ch.findIndex((s) => s.fk === e.fn) ?? -1
+  return errHref(e, stage >= 0 ? { ...ref, si: stage } : ref)
+}
+
 export const methodHue: Record<string, string> = {
   GET: 'text-info',
   POST: 'text-acc',
