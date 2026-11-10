@@ -16,20 +16,24 @@ function ReturnEdgeInner({
   targetPosition,
 }: EdgeProps) {
   const straight = Math.abs(sourceY - targetY) < 1
-  // return circles are 3px narrower on the right than their handle centre
-  const tx = targetX - 3
+  // Use the handle centre itself: nudging side handles inward made the new
+  // bottom exit jog a few pixels instead of leaving vertically.
+  const tx = targetX
+  const vertical = Math.abs(sourceX - tx) < 1
   const [path, labelX, labelY] = straight
     ? ([`M ${sourceX} ${sourceY} H ${tx}`, (sourceX + tx) / 2, sourceY] as const)
-    : getSmoothStepPath({
-        sourceX,
-        sourceY,
-        targetX: tx,
-        targetY,
-        sourcePosition,
-        targetPosition,
-        borderRadius: 10,
-        offset: 10,
-      })
+    : vertical
+      ? ([`M ${sourceX} ${sourceY} V ${targetY}`, sourceX, (sourceY + targetY) / 2] as const)
+      : getSmoothStepPath({
+          sourceX,
+          sourceY,
+          targetX: tx,
+          targetY,
+          sourcePosition,
+          targetPosition,
+          borderRadius: 10,
+          offset: 10,
+        })
   const text = typeof label === 'string' ? label : ''
   const code = typeof data?.code === 'string' ? data.code : undefined
   const tone = statusTone(code)

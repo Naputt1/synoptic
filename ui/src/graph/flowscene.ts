@@ -217,7 +217,7 @@ export function buildFlowScene(
     return { id, idx }
   }
 
-  const addReturn = (s: Step, y: number, idx: number): string => {
+  const addReturn = (s: Step, y: number, idx: number, x = RAIL_X, top = false): string => {
     const id = nextId()
     const label = codesLabel(s)
     const retSub = s.rk
@@ -227,11 +227,12 @@ export function buildFlowScene(
       : label || 'return'
     // one code stays a circle; several widen it into a pill that still fits the text
     const w = Math.max(RET_W, 14 + label.length * 6.2)
+    const at = top ? y : y + RET_DY
     nodes.push(
       card(
         id,
-        RAIL_X,
-        y + RET_DY,
+        x,
+        at,
         {
           kind: 'return',
           title: s.t || 'return',
@@ -249,7 +250,7 @@ export function buildFlowScene(
         RET_W,
       ),
     )
-    place(id, RAIL_X, y + RET_DY, w, RET_W, 'return')
+    place(id, x, at, w, RET_W, 'return')
     codeOf.set(id, label)
     return id
   }
@@ -648,6 +649,31 @@ export function buildFlowScene(
   const last = renderList(flow.flow ?? [], 0, null).tail
 
   const tail = inputs?.length ? (addInputs(inputs, last) ?? last) : last
+
+  // A status-bearing response call at the tail is the normal exit. Early
+  // returns keep their circles on the left rail; this one leaves the spine
+  // vertically and lands in a status circle underneath it.
+  const finalStep = flow.flow?.[flow.flow.length - 1]
+  const lastAt = last ? pos.get(last) : undefined
+  if (finalStep?.k === 'call' && codesOf(finalStep).length && lastAt?.kind === 'call') {
+    let bottom = lastAt.y + lastAt.h
+    for (const node of nodes) {
+      const d = node.data as { h?: number }
+      bottom = Math.max(bottom, node.position.y + ((d.h as number) ?? CARD_H))
+    }
+    const label = codesLabel(finalStep)
+    const w = Math.max(RET_W, 14 + label.length * 6.2)
+    const rid = addReturn(finalStep, bottom + 26, nextStep(), lastAt.x + (lastAt.w - w) / 2, true)
+    edges.push({
+      id: `${last}->${rid}`,
+      source: last as string,
+      target: rid,
+      sourceHandle: 'b',
+      targetHandle: 't',
+      type: 'return',
+      data: { code: label },
+    } as SEdge)
+  }
 
   // the next filter sits under the whole flow, on the spine
   if (cont && !nextLinked) {
