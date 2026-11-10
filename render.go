@@ -33,6 +33,10 @@ type JRoute struct {
 	St    *JStream `json:"st,omitempty"`
 	Chain []JStage `json:"ch"`
 	Doc   *JDoc    `json:"doc,omitempty"`
+
+	// origin is the route this entry came from, used to index error refs after
+	// the page order is sorted.
+	origin *Route
 }
 
 // JSvc is one entry point of a multi-service module, with what it owns.
@@ -70,6 +74,7 @@ type JStats struct {
 	SSE        int `json:"sse,omitempty"`
 	Services   int `json:"services,omitempty"`
 	RPCs       int `json:"rpcs,omitempty"`
+	Errors     int `json:"errors,omitempty"`
 }
 
 type JData struct {
@@ -82,6 +87,7 @@ type JData struct {
 	Flows    map[string]JFunc        `json:"flows"`
 	Types    map[string]JType        `json:"types,omitempty"`
 	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
+	Errs     []JErr                  `json:"errs,omitempty"`
 }
 
 func buildData(m *Module, routes []*Route) JData {
@@ -105,7 +111,7 @@ func buildData(m *Module, routes []*Route) JData {
 		if r.Stream != nil {
 			r.Proto = r.Stream.K
 		}
-		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line, Pr: r.Proto, St: r.Stream}
+		jr := JRoute{M: r.Method, P: r.Path, F: r.File.Rel, L: r.Line, Pr: r.Proto, St: r.Stream, origin: r}
 		if len(d.Svcs) > 0 {
 			jr.Svc = svcForFile(d.Svcs, r.File.Rel)
 		}
@@ -497,5 +503,8 @@ func report(d JData, out string) {
 	}
 	fmt.Printf("  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
 	fmt.Printf("  flows baked                  %d functions\n", d.Stats.Funcs)
+	if d.Stats.Errors > 0 {
+		fmt.Printf("  error messages               %d\n", d.Stats.Errors)
+	}
 	fmt.Printf("  written to %s\n", out)
 }

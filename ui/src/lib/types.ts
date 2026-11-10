@@ -199,6 +199,8 @@ export type Step = {
   cd?: string
   cds?: string[]
   l?: number
+  /** last source line the step covers */
+  se?: number
   g?: string
   fk?: string
   ik?: string
@@ -208,6 +210,25 @@ export type Step = {
   b?: Step[]
   e?: Step[]
   rpc?: string
+  /** previews of the runtime messages this step can emit */
+  em?: number[]
+}
+
+/** One ref of an error message: an HTTP route stage or an RPC method. */
+export type ErrRef = { k?: 'rpc'; ri: number; si?: number; mi?: number }
+
+/** One runtime message the repo can emit, with where it is written and how to reach it. */
+export type JErr = {
+  m: string
+  k: 'response' | 'error' | 'log' | 'panic'
+  c?: string[]
+  f: string
+  l: number
+  fn: string
+  d?: string
+  x?: boolean
+  r?: ErrRef[]
+  n?: number
 }
 
 export type FuncFlow = {
@@ -280,6 +301,7 @@ export type Data = {
   flows: Record<string, FuncFlow>
   types?: Record<string, SynType>
   timing?: Record<string, RouteTiming>
+  errs?: JErr[]
 }
 
 declare global {

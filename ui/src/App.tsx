@@ -9,7 +9,7 @@ import {
   useRouterState,
   useSearch,
 } from '@tanstack/react-router'
-import { Code2, Search } from 'lucide-react'
+import { Bug, Code2, Crosshair, Search } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import { GoSource } from './components/GoSource'
@@ -19,6 +19,7 @@ import { SearchDialog } from './components/ui/command'
 import { AppLink } from './components/ui/link'
 import { Segmented } from './components/ui/segmented'
 import { Sheet } from './components/ui/sheet'
+import { TraceDialog } from './components/ui/trace'
 import { buildFlowScene } from './graph/flowscene'
 import { SceneCanvas } from './graph/SceneCanvas'
 import { buildPipelineScene, buildRouterScene, externalCalls, type Scene } from './graph/scenes'
@@ -183,7 +184,7 @@ function useCrumbs(): Crumb[] {
 
 /* ---------- shell ---------- */
 
-function Topbar({ onSearch }: { onSearch: () => void }) {
+function Topbar({ onSearch, onTrace }: { onSearch: () => void; onTrace: () => void }) {
   const data = useData()
   const svc = useSvc()
   const { setSvc } = useSvcSwitch()
@@ -310,6 +311,17 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
             />
           </div>
         )}
+        <Button
+          variant="default"
+          size="sm"
+          onClick={onTrace}
+          title="trace a runtime error back to source"
+        >
+          <Bug className="size-3" /> trace
+          <kbd className="border-line text-faint ml-1 rounded-[3px] border px-1 text-[9.5px]">
+            ctrl J
+          </kbd>
+        </Button>
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
           <kbd className="border-line text-faint ml-1 rounded-[3px] border px-1 text-[9.5px]">
@@ -361,6 +373,7 @@ function Crumbs() {
 function Shell() {
   const data = useData()
   const [searchOpen, setSearchOpen] = useState(false)
+  const [traceOpen, setTraceOpen] = useState(false)
   const [svc, setSvc] = useState('')
   const [toast, setToast] = useState<{ id: number; text: string; tone: 'ok' | 'bad' } | null>(null)
 
@@ -373,18 +386,26 @@ function Shell() {
       hide = window.setTimeout(() => setToast(null), 1800)
     }
     const onSearch = () => setSearchOpen(true)
+    const onTrace = () => setTraceOpen(true)
     window.addEventListener('synoptic:toast', onToast)
     window.addEventListener('synoptic:search', onSearch)
+    window.addEventListener('synoptic:trace', onTrace)
     return () => {
       window.clearTimeout(hide)
       window.removeEventListener('synoptic:toast', onToast)
       window.removeEventListener('synoptic:search', onSearch)
+      window.removeEventListener('synoptic:trace', onTrace)
     }
   }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = (e.target as HTMLElement | null)?.closest('input,textarea')
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        setTraceOpen((v) => !v)
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         setSearchOpen((v) => !v)
@@ -392,12 +413,17 @@ function Shell() {
       }
       if (
         document.querySelector(
-          '[data-slot="context-menu-content"], [data-slot="search-dialog"], [role="dialog"]',
+          '[data-slot="context-menu-content"], [data-slot="search-dialog"], [data-slot="trace-dialog"], [role="dialog"]',
         )
       ) {
-        if (e.key === 'Escape' && searchOpen) {
-          e.preventDefault()
-          setSearchOpen(false)
+        if (e.key === 'Escape') {
+          if (searchOpen) {
+            e.preventDefault()
+            setSearchOpen(false)
+          } else if (traceOpen) {
+            e.preventDefault()
+            setTraceOpen(false)
+          }
         }
         return
       }
@@ -411,18 +437,19 @@ function Shell() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [searchOpen])
+  }, [searchOpen, traceOpen])
 
   return (
     <SvcCtx.Provider value={{ svc, setSvc }}>
       <div className="bg-canvas flex h-full flex-col">
-        <Topbar onSearch={() => setSearchOpen(true)} />
+        <Topbar onSearch={() => setSearchOpen(true)} onTrace={() => setTraceOpen(true)} />
         <Crumbs />
         <div className="relative min-h-0 flex-1">
           <Outlet />
         </div>
         <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
-          click any box to open it · right-click for actions · esc goes back · ⌘K searches
+          click any box to open it · right-click for actions · esc goes back · ⌘K searches · ctrl
+          J traces an error
         </div>
         {toast && (
           <div
@@ -439,6 +466,7 @@ function Shell() {
           </div>
         )}
         <SearchDialog data={data} open={searchOpen} onOpenChange={setSearchOpen} svc={svc} />
+        <TraceDialog data={data} open={traceOpen} onOpenChange={setTraceOpen} svc={svc} />
       </div>
     </SvcCtx.Provider>
   )
@@ -538,16 +566,30 @@ function GraphPage({
   scene,
   card,
   children,
+  focusLine,
+  trace,
 }: {
   scene: Scene
   card: React.ReactNode
   children?: React.ReactNode
+  focusLine?: number
+  trace?: { msg: string; file: string; line: number }
 }) {
   return (
     <div className="flex h-full flex-col">
       {card}
+      {trace && (
+        <div className="border-line bg-acc/[0.05] flex items-center gap-2 border-b px-3 py-1.5 text-[11px]">
+          <Crosshair className="text-acc size-3.5 shrink-0" />
+          <span className="text-acc shrink-0">traced message</span>
+          <span className="text-ink min-w-0 flex-1 truncate font-mono">{trace.msg}</span>
+          <span className="text-faint shrink-0 font-mono text-[10px]">
+            {trace.file}:{trace.line}
+          </span>
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
-        <SceneCanvas scene={scene} />
+        <SceneCanvas scene={scene} focusLine={focusLine} />
       </div>
       {children && (
         <div className="border-line bg-panel/30 max-h-[44vh] shrink-0 overflow-auto border-t">
@@ -1585,9 +1627,9 @@ function FlowView() {
   const scene = useMemo(
     () =>
       flow
-        ? buildFlowScene(flow, key, nextStage, prevStage, st?.in, { ri, si })
+        ? buildFlowScene(flow, key, nextStage, prevStage, st?.in, { ri, si }, data.errs)
         : { nodes: [], edges: [], key: '' },
-    [flow, key, nextStage, prevStage, st?.in, ri, si],
+    [flow, key, nextStage, prevStage, st?.in, ri, si, data.errs],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
@@ -1651,9 +1693,17 @@ function FlowView() {
 
 function FnView() {
   const data = useData()
-  const search = useSearch({ strict: false }) as { k?: string; ri?: string; si?: string }
+  const search = useSearch({ strict: false }) as {
+    k?: string
+    ri?: string
+    si?: string
+    hl?: string
+  }
   const key = search.k ?? ''
   const flow: FuncFlow | undefined = flowOf(data, key)
+  const hl = numParam(search.hl)
+  const traceSite =
+    hl !== undefined ? data.errs?.find((e) => e.fn === key && e.l === hl) : undefined
   const parentRi = Number(search.ri)
   const parentSi = Number(search.si)
   const parentOk =
@@ -1661,31 +1711,42 @@ function FnView() {
     search.si !== undefined &&
     Number.isInteger(parentRi) &&
     Number.isInteger(parentSi)
+  // A trace URL carries only the function and line. Recover the route that
+  // reaches it so the crumbs and stage jumps stay useful.
+  const derived = useMemo(() => {
+    if (parentOk || !traceSite) return undefined
+    const ref = traceSite.r?.find((r) => r.k !== 'rpc')
+    const route = ref ? data.routes[ref.ri] : undefined
+    const stage = route?.ch.findIndex((s) => s.fk === key) ?? -1
+    return route && ref && stage >= 0 ? { ri: ref.ri, si: stage } : undefined
+  }, [parentOk, traceSite, data.routes, key])
+  const atRi = parentOk ? parentRi : derived?.ri
+  const atSi = parentOk ? parentSi : derived?.si
   const origin = useMemo(
-    () => (parentOk ? { ri: parentRi, si: parentSi } : undefined),
-    [parentOk, parentRi, parentSi],
+    () => (atRi !== undefined && atSi !== undefined ? { ri: atRi, si: atSi } : undefined),
+    [atRi, atSi],
   )
-  const parent = parentOk ? data.routes[parentRi] : undefined
+  const parent = atRi !== undefined ? data.routes[atRi] : undefined
   const nextStage = useMemo(
     () =>
-      parent && parentSi + 1 < parent.ch.length
-        ? { label: parent.ch[parentSi + 1].n, href: `/r/${parentRi}/s/${parentSi + 1}` }
+      parent && atSi !== undefined && atSi + 1 < parent.ch.length
+        ? { label: parent.ch[atSi + 1].n, href: `/r/${atRi}/s/${atSi + 1}` }
         : undefined,
-    [parent, parentRi, parentSi],
+    [parent, atRi, atSi],
   )
   const prevStage = useMemo(
     () =>
-      parent && parentSi > 0
-        ? { label: parent.ch[parentSi - 1].n, href: `/r/${parentRi}/s/${parentSi - 1}` }
+      parent && atSi !== undefined && atSi > 0
+        ? { label: parent.ch[atSi - 1].n, href: `/r/${atRi}/s/${atSi - 1}` }
         : undefined,
-    [parent, parentRi, parentSi],
+    [parent, atRi, atSi],
   )
   const scene = useMemo(
     () =>
       flow
-        ? buildFlowScene(flow, key, nextStage, prevStage, flow.in, origin)
+        ? buildFlowScene(flow, key, nextStage, prevStage, flow.in, origin, data.errs)
         : { nodes: [], edges: [], key: '' },
-    [flow, key, nextStage, prevStage, origin],
+    [flow, key, nextStage, prevStage, origin, data.errs],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
@@ -1717,6 +1778,10 @@ function FnView() {
   return (
     <GraphPage
       scene={scene}
+      focusLine={hl}
+      trace={
+        traceSite ? { msg: traceSite.m, file: traceSite.f, line: traceSite.l } : undefined
+      }
       card={
         <ScopeCard
           title={flow.n}
@@ -2054,9 +2119,16 @@ function RPCMethodView() {
   const method = svc?.methods[mi]
   const key = method?.fk ?? ''
   const flow: FuncFlow | undefined = key ? flowOf(data, key) : undefined
+  const search = useSearch({ strict: false }) as { hl?: string }
+  const hl = numParam(search.hl)
+  const traceSite =
+    hl !== undefined ? data.errs?.find((e) => e.fn === key && e.l === hl) : undefined
   const scene = useMemo(
-    () => (flow ? buildFlowScene(flow, key, undefined, undefined, flow.in, undefined) : emptyScene),
-    [flow, key],
+    () =>
+      flow
+        ? buildFlowScene(flow, key, undefined, undefined, flow.in, undefined, data.errs)
+        : emptyScene,
+    [flow, key, data.errs],
   )
   const [sheet, setSheet] = useState(false)
   const [focus, setFocus] = useState<{ line?: number; lines?: number[] }>({})
@@ -2079,6 +2151,10 @@ function RPCMethodView() {
   return (
     <GraphPage
       scene={scene}
+      focusLine={hl}
+      trace={
+        traceSite ? { msg: traceSite.m, file: traceSite.f, line: traceSite.l } : undefined
+      }
       card={
         <ScopeCard
           title={`${svc.n} / ${method.n}`}

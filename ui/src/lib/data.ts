@@ -1,4 +1,4 @@
-import type { Data, FuncFlow, Route, RouteTiming, Stage } from './types'
+import type { Data, ErrRef, FuncFlow, JErr, Route, RouteTiming, Stage } from './types'
 
 let cache: Data | null = null
 
@@ -38,10 +38,25 @@ export const stageHref = (ri: number, si: number) => `/r/${ri}/s/${si}`
 export const fnHref = (
   key: string,
   origin?: { ri: number; si: number },
-  ctx?: { ik?: string; sk?: string },
+  ctx?: { ik?: string; sk?: string; hl?: number },
 ) =>
   `/f?k=${encodeURIComponent(key)}${origin ? `&ri=${origin.ri}&si=${origin.si}` : ''}` +
-  `${ctx?.ik ? `&i=${encodeURIComponent(ctx.ik)}` : ''}${ctx?.sk ? `&t=${encodeURIComponent(ctx.sk)}` : ''}`
+  `${ctx?.ik ? `&i=${encodeURIComponent(ctx.ik)}` : ''}` +
+  `${ctx?.sk ? `&t=${encodeURIComponent(ctx.sk)}` : ''}${ctx?.hl ? `&hl=${ctx.hl}` : ''}`
+
+/** Where a runtime message goes when you click it: its function and line, or its surface. */
+export const errHref = (e: JErr, ref?: ErrRef): string | undefined => {
+  if (ref?.k === 'rpc') return `/rpc/${ref.si ?? 0}/${ref.mi ?? 0}?hl=${e.l}`
+  if (e.fn) {
+    const origin =
+      ref && Number.isInteger(ref.ri) && ref.si !== undefined
+        ? { ri: ref.ri, si: ref.si }
+        : undefined
+    return fnHref(e.fn, origin, { hl: e.l })
+  }
+  if (ref) return stageHref(ref.ri, ref.si ?? 0)
+  return undefined
+}
 
 export const methodHue: Record<string, string> = {
   GET: 'text-info',

@@ -3,8 +3,10 @@ import { motion, useReducedMotion } from 'motion/react'
 import { memo } from 'react'
 
 import { AppLink } from '../components/ui/link'
+import { useErrTip } from '../components/ErrPreview'
 import { absoluteLink } from '../lib/actions'
 import { statusBadgeTone, type StatusTone, statusTone } from '../lib/status'
+import type { JErr } from '../lib/types'
 import { CardMenu } from './NodeMenu'
 import type { SData, SNode } from './scenes'
 
@@ -71,7 +73,7 @@ const methodTone: Record<string, string> = {
   ANY: 'text-mut',
 }
 
-function Tag({ t }: { t: string }) {
+function Tag({ t, title }: { t: string; title?: string }) {
   const label = t === 'db' ? 'database' : t === 'cache' ? 'cache' : t === 'net' ? 'outbound' : t
   const kind = t.split(/[:× ]/)[0]
   const tone =
@@ -98,7 +100,8 @@ function Tag({ t }: { t: string }) {
                         : 'text-mut border-line'
   return (
     <span
-      className={`rounded-[3px] border px-1 py-px text-[10px] tracking-[0.1em] uppercase ${tone}`}
+      title={title ?? label}
+      className={`inline-block max-w-[150px] truncate rounded-[3px] border px-1 py-px align-middle text-[10px] tracking-[0.1em] uppercase ${tone}`}
     >
       {label}
     </span>
@@ -118,6 +121,11 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
   const clickable = Boolean(d.href)
   const href = typeof d.href === 'string' ? d.href : undefined
   const isLabel = d.kind === 'label'
+  const tip = useErrTip(d.errs as JErr[] | undefined)
+  const tags = d.tags ?? []
+  // a flow card has room for one tag row; longer lists stay readable as +N
+  const shownTags = tags.length > 2 ? tags.slice(0, 1) : tags
+  const hiddenTags = tags.length - shownTags.length
 
   if (isLabel) {
     return (
@@ -181,9 +189,10 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
             ease: [0.22, 0.7, 0.3, 1],
           }}
           style={{ width: (d.w as number) ?? 32, height: (d.h as number) ?? 32 }}
-          className={`relative ${clickable ? 'cursor-pointer' : ''}`}
+          className={`relative ${clickable ? 'cursor-pointer' : ''} ${d.focused ? 'ring-2 ring-acc/70 ring-offset-2 ring-offset-canvas rounded-full' : ''}`}
           title={d.title}
           onContextMenu={(e) => e.stopPropagation()}
+          {...tip.bind}
         >
           <Handle type="target" position={Position.Top} id="t" />
           <Handle type="source" position={Position.Bottom} id="b" />
@@ -198,6 +207,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
               {String(d.badge || '↩')}
             </span>
           </div>
+          {tip.node}
         </motion.div>
       </CardMenu>
     )
@@ -231,6 +241,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
                 ? 'border-line2 bg-panel2'
                 : 'border-line bg-panel',
           clickable ? 'cursor-pointer transition-colors hover:border-acc/60 hover:bg-panel2' : '',
+          d.focused ? 'ring-2 ring-acc/60' : '',
         ].join(' ')}
       >
         <Handle type="target" position={Position.Top} id="t" />
@@ -263,8 +274,12 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
             {d.title}
           </span>
           {d.badge && !isRoute && !isExit && (
-            <span className="border-line text-mut shrink-0 rounded-[3px] border px-1 text-[9.5px] tracking-[0.1em] uppercase">
+            <span
+              {...(d.errs?.length ? tip.bind : {})}
+              className="border-line text-mut shrink-0 rounded-[3px] border px-1 text-[9.5px] tracking-[0.1em] uppercase"
+            >
               {d.badge}
+              {d.errs?.length ? tip.node : null}
             </span>
           )}
           {href && (
@@ -281,16 +296,17 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           )}
         </div>
 
-        {(d.sub || (d.tags && d.tags.length > 0) || isStage) && (
+        {(d.sub || tags.length > 0 || isStage) && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {d.sub && (
               <span className="text-mut min-w-0 flex-1 truncate text-[10.5px]" title={d.sub}>
                 {d.sub}
               </span>
             )}
-            {(d.tags ?? []).map((t) => (
+            {(shownTags ?? []).map((t) => (
               <Tag key={t} t={t} />
             ))}
+            {hiddenTags > 0 && <Tag t={`+${hiddenTags}`} title={tags.join(' · ')} />}
             {d.ms && (
               <span className="text-info ml-auto shrink-0 text-[10.5px] tabular-nums">{d.ms}</span>
             )}
@@ -315,9 +331,11 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
             {d.rk && <Tag t={d.rk} />}
             {d.badge && (!d.rk || d.badge !== 'exits') && (
               <span
+                {...tip.bind}
                 className={`rounded-[3px] border px-1 text-[10px] leading-[14px] ${statusBadgeTone[statusTone(d.badge as string | undefined)]}`}
               >
                 {d.badge}
+                {tip.node}
               </span>
             )}
           </div>

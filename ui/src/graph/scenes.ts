@@ -2,7 +2,7 @@ import type { Edge, Node } from '@xyflow/react'
 
 import { msOf, routeHref, segments, stageHref, tagLabel, touchTags } from '../lib/data'
 import { codesOf } from '../lib/status'
-import type { Data, FuncFlow, Route, RouteTiming } from '../lib/types'
+import type { Data, FuncFlow, JErr, Route, RouteTiming } from '../lib/types'
 
 export type NodeKind =
   | 'root'
@@ -35,6 +35,8 @@ export type SData = {
   file?: string
   line?: number
   lines?: number[]
+  /** last line of the source construct, for trace focus */
+  spanEnd?: number
   startLine?: number
   /** true when the current view can open the source sheet from a card */
   source?: boolean
@@ -46,6 +48,10 @@ export type SData = {
   ms?: string
   /** trace overlay: 0..1 share of the route's summed time */
   share?: number
+  /** runtime messages this node can emit, for the hover preview */
+  errs?: JErr[]
+  /** true while a pasted message is being traced to this node */
+  focused?: boolean
 } & Record<string, unknown>
 
 export type SNode = Node<SData, 'scene'>

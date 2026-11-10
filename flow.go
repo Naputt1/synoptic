@@ -29,10 +29,15 @@ type Step struct {
 	Count   int      `json:"c,omitempty"`
 	Body    []Step   `json:"b,omitempty"`
 	Else    []Step   `json:"e,omitempty"`
+	// Errs indexes into JData.Errs for every message written on this step's
+	// source span, so a status circle can preview them on hover.
+	Errs    []int `json:"em,omitempty"`
+	SpanEnd int   `json:"se,omitempty"` // last source line the step covers
 
-	Rpc   string `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
-	Iface string `json:"-"`             // declared type of the field the call goes through
-	Sel   string `json:"-"`             // method name on that field
+	Rpc     string   `json:"rpc,omitempty"` // "si/mi" into the service list, when the call leaves over gRPC
+	Writes  []string `json:"-"`             // response helpers called on this step's span
+	Iface   string   `json:"-"`             // declared type of the field the call goes through
+	Sel     string   `json:"-"`             // method name on that field
 }
 
 func buildFlow(f *Func) []Step {
@@ -100,6 +105,9 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 		}
 		if n := len(out); n > 0 && out[n-1].Kind == st.Kind && out[n-1].Text == st.Text {
 			out[n-1].Count++
+			if st.SpanEnd > out[n-1].SpanEnd {
+				out[n-1].SpanEnd = st.SpanEnd
+			}
 			return
 		}
 		if st.Count == 0 {
@@ -209,7 +217,7 @@ func flowSteps(f *Func, list []ast.Stmt) []Step {
 		case *ast.LabeledStmt:
 			add(Step{Kind: "note", Text: x.Label.Name + ":", Line: line(x.Pos())})
 		case *ast.ReturnStmt:
-			st := Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Rk: returnKind(x.Results), Line: line(x.Pos())}
+			st := Step{Kind: "ret", Text: "return " + exprTexts(x.Results), Rk: returnKind(x.Results), Line: line(x.Pos()), SpanEnd: line(x.End())}
 			if len(x.Results) > 0 {
 				if ce := firstCall(x.Results[0]); ce != nil {
 					setCodes(&st, newStatusWalk().callStatuses(ce, calls, f, nil))
@@ -353,9 +361,18 @@ func nextThenReturn(list []ast.Stmt, i int) bool {
 	return ok && (c.Base == "c" || c.Base == "ctx") && c.Sel == "Next"
 }
 
-// callStep turns a statement's outermost call into a step, or into nothing when
-// it is noise: logging, error formatting, decoding scaffolding.
+// callStep classifies one expression into a step, or into nothing when it is
+// noise (logging, error formatting, decoding scaffolding), and records the full
+// source span so a message inside a multi-line call can be attached to it.
 func callStep(f *Func, e ast.Expr, calls map[string]Call) Step {
+	st := callStepInner(f, e, calls)
+	if ce := firstCall(e); ce != nil {
+		st.SpanEnd = line(ce.End())
+	}
+	return st
+}
+
+func callStepInner(f *Func, e ast.Expr, calls map[string]Call) Step {
 	ce := firstCall(e)
 	if ce == nil {
 		return Step{}
@@ -615,9 +632,22 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 	// c.JSON(400, …); return — the status lives on the line before the return
 	sw := newStatusWalk()
 	codes := map[string]bool{}
+	writes := []string{}
 	take := func(set map[string]bool) {
 		for code := range set {
 			codes[code] = true
+		}
+	}
+	noteWrite := func(ce *ast.CallExpr) {
+		c, ok := describeCall(ce)
+		if !ok {
+			return
+		}
+		if resolved, known := calls[c.Expr]; known {
+			c = resolved
+		}
+		if c.Target != nil && c.Target.Key != "" && writesResponse(c) {
+			writes = append(writes, c.Target.Key)
 		}
 	}
 	// if !decode(c, &in) { return } — the helper writes the status itself
@@ -627,6 +657,7 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 			return true
 		}
 		take(sw.callStatuses(ce, calls, f, nil))
+		noteWrite(ce)
 		return true
 	})
 	for _, s := range x.Body.List {
@@ -639,9 +670,10 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 			continue
 		}
 		take(sw.callStatuses(ce, calls, f, nil))
+		noteWrite(ce)
 	}
 	// the call that can fail is more useful than the condition that tests it
-	st := Step{Kind: "exit", Text: exprText(x.Cond), Rk: returnKind(ret.Results), Line: line(x.Pos())}
+	st := Step{Kind: "exit", Text: exprText(x.Cond), Rk: returnKind(ret.Results), Line: line(x.Pos()), SpanEnd: line(x.End())}
 	if st.Rk == "" && errorBranch(x) {
 		st.Rk = "error"
 	}
@@ -672,6 +704,9 @@ func exitOf(f *Func, x *ast.IfStmt, calls map[string]Call) (Step, bool) {
 		}
 	}
 	setCodes(&st, codes)
+	if len(writes) > 0 {
+		st.Writes = uniqueStrings(writes)
+	}
 	if st.Text != exprText(x.Cond) {
 		st.Sub = "if " + exprText(x.Cond)
 		st.SubLine = line(x.Pos())

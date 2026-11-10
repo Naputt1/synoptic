@@ -32,6 +32,7 @@ func main() {
 	}
 	d := buildData(m, routes)
 	attachServices(m, &d, services)
+	attachErrors(m, routes, &d)
 	if *trace != "" {
 		tm, err := buildTiming(*trace, routes)
 		if err != nil {

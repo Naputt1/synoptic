@@ -65,7 +65,7 @@ function sceneBox(nodes: SNode[]): Box {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
 }
 
-function Inner({ scene }: { scene: Scene }) {
+function Inner({ scene, focusLine }: { scene: Scene; focusLine?: number }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<SNode>(scene.nodes)
   const { setViewport, fitView } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
@@ -129,6 +129,51 @@ function Inner({ scene }: { scene: Scene }) {
       window.clearTimeout(retry)
     }
   }, [scene.key, nodesInitialized, setViewport, fitView])
+
+  // A pasted message lands on a line inside a call: take the closest step at
+  // or before it, ring it, and centre it once the first fit has settled.
+  useEffect(() => {
+    if (focusLine === undefined || !nodesInitialized) return
+    const distOf = (d: SData) => {
+      const line = d.line
+      if (line === undefined) return Infinity
+      const end = Math.max(line, d.spanEnd ?? line)
+      if ((focusLine >= line && focusLine <= end) || d.lines?.includes(focusLine)) return 0
+      return line <= focusLine ? focusLine - end : line - focusLine + 10000
+    }
+    let best: { x: number; y: number; w: number; h: number; dist: number } | null = null
+    for (const n of scene.nodes) {
+      const d = n.data as SData
+      const dist = distOf(d)
+      if (!Number.isFinite(dist)) continue
+      const w = (d.w as number | undefined) ?? 380
+      const h = (d.h as number | undefined) ?? 84
+      if (!best || dist < best.dist) best = { x: n.position.x, y: n.position.y, w, h, dist }
+    }
+    if (!best) return
+    const target = best
+    const timer = window.setTimeout(() => {
+      setNodes((current) =>
+        current.map((n) => {
+          const d = n.data as SData
+          const hit = distOf(d) === 0
+          return Boolean(d.focused) === hit ? n : { ...n, data: { ...d, focused: hit } }
+        }),
+      )
+      const el = wrap.current
+      if (!el) return
+      const zoom = 1.1
+      setViewport(
+        {
+          x: el.clientWidth / 2 - (target.x + target.w / 2) * zoom,
+          y: el.clientHeight / 2 - (target.y + target.h / 2) * zoom,
+          zoom,
+        },
+        { duration: 420 },
+      )
+    }, 480)
+    return () => window.clearTimeout(timer)
+  }, [focusLine, nodesInitialized, scene, setNodes, setViewport])
 
   const onNodeClick = useCallback<NodeMouseHandler<SNode>>((e, n) => {
     const input = n.data.input as string | undefined
@@ -245,10 +290,10 @@ function Inner({ scene }: { scene: Scene }) {
   )
 }
 
-export function SceneCanvas({ scene }: { scene: Scene }) {
+export function SceneCanvas({ scene, focusLine }: { scene: Scene; focusLine?: number }) {
   return (
     <ReactFlowProvider>
-      <Inner scene={scene} />
+      <Inner scene={scene} focusLine={focusLine} />
     </ReactFlowProvider>
   )
 }

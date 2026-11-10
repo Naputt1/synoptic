@@ -1,6 +1,6 @@
 import { fnHref } from '../lib/data'
 import { codesLabel, codesOf } from '../lib/status'
-import type { FuncFlow, Input, Step } from '../lib/types'
+import type { FuncFlow, Input, JErr, Step } from '../lib/types'
 import type { Scene, SEdge, SNode } from './scenes'
 
 const GAP = 88
@@ -65,10 +65,17 @@ export function buildFlowScene(
   prev?: { label: string; href: string },
   inputs?: Input[],
   origin?: { ri: number; si: number },
+  errs?: JErr[],
 ): Scene {
   const nodes: SNode[] = []
   const edges: SEdge[] = []
   const startLine = flow.l ?? 1
+
+  const errsAt = (s: Step): JErr[] | undefined => {
+    if (!errs?.length || !s.em?.length) return undefined
+    const out = s.em.map((i) => errs[i]).filter((e): e is JErr => Boolean(e))
+    return out.length ? out : undefined
+  }
 
   let n = 0
   let stepNo = 0
@@ -194,6 +201,8 @@ export function buildFlowScene(
               ? [s.g]
               : undefined,
         rk: kind === 'exit' ? s.rk : undefined,
+        errs:
+          kind === 'exit' || (kind === 'call' && codesLabel(s)) ? errsAt(s) : undefined,
         index: idx,
         jump: Boolean(jump),
         href: jump
@@ -204,6 +213,7 @@ export function buildFlowScene(
               ? fnHref(s.fk, origin, s.ik && s.sk ? { ik: s.ik, sk: s.sk } : undefined)
               : undefined,
         line: s.l,
+        spanEnd: s.se,
         lines: s.ls && s.ls.length > 1 ? s.ls : s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
         startLine,
         file: s.f ?? flow.f,
@@ -234,9 +244,11 @@ export function buildFlowScene(
           title: s.t || 'return',
           badge: label,
           sub: retSub,
+          errs: errsAt(s),
           index: idx,
           href: s.fk ? fnHref(s.fk) : undefined,
           line: s.l,
+          spanEnd: s.se,
           lines: s.sl && s.sl !== s.l ? [s.l, s.sl] : undefined,
           startLine,
           file: s.f ?? flow.f,

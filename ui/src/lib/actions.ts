@@ -55,3 +55,7 @@ export function showSource(line: number, lines?: number[], startLine?: number) {
 export function openSearch() {
   window.dispatchEvent(new CustomEvent('synoptic:search'))
 }
+
+export function openTrace() {
+  window.dispatchEvent(new CustomEvent('synoptic:trace'))
+}
