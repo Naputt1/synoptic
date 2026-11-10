@@ -35,6 +35,8 @@ export function flowOf(d: Data, key?: string): FuncFlow | undefined {
 
 export const routeHref = (ri: number) => `/r/${ri}`
 export const stageHref = (ri: number, si: number) => `/r/${ri}/s/${si}`
+export const depsHref = (p: string, all = false) =>
+  `/deps?p=${encodeURIComponent(p)}${all ? '&all=1' : ''}`
 export const fnHref = (
   key: string,
   origin?: { ri: number; si: number },

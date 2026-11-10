@@ -9,7 +9,7 @@ import {
   useRouterState,
   useSearch,
 } from '@tanstack/react-router'
-import { Code2, Search } from 'lucide-react'
+import { Code2, LocateFixed, Search } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import { GoSource } from './components/GoSource'
@@ -21,8 +21,15 @@ import { Segmented } from './components/ui/segmented'
 import { Sheet } from './components/ui/sheet'
 import { buildFlowScene } from './graph/flowscene'
 import { SceneCanvas } from './graph/SceneCanvas'
-import { buildPipelineScene, buildRouterScene, externalCalls, type Scene } from './graph/scenes'
 import {
+  buildDepsScene,
+  buildPipelineScene,
+  buildRouterScene,
+  externalCalls,
+  type Scene,
+} from './graph/scenes'
+import {
+  depsHref,
   flowOf,
   fnHref,
   frameName,
@@ -38,6 +45,7 @@ import { goto } from './lib/nav'
 import type {
   Call,
   Data,
+  Dep,
   Effect,
   FuncFlow,
   Route,
@@ -86,6 +94,8 @@ function useCrumbs(): Crumb[] {
     t?: string
     ri?: string
     si?: string
+    p?: string
+    all?: string
   }
   const parts = pathname.split('/').filter(Boolean)
   const crumbs: Crumb[] = [{ label: data.repo, href: '/' }]
@@ -178,6 +188,12 @@ function useCrumbs(): Crumb[] {
     if (f && crumbs[crumbs.length - 1]?.label !== f.n) crumbs.push({ label: f.n, href: '#' })
   }
 
+  if (parts[0] === 'deps') {
+    crumbs.push({ label: 'deps', href: '/deps' })
+    const dep = search.p ? data.deps?.find((d) => d.p === search.p) : undefined
+    if (dep) crumbs.push({ label: dep.m ? dep.e || dep.n : dep.n, href: '#' })
+  }
+
   return crumbs
 }
 
@@ -210,15 +226,13 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const parts = pathname.split('/').filter(Boolean)
   const level =
-    parts[0] === 'rpc'
+    parts[0] === 'rpc' || parts[0] === 'f' || parts[0] === 'deps'
       ? ''
-      : parts[0] === 'f'
-        ? ''
-        : parts[0] === 'r'
-          ? parts[2] === 's'
-            ? 'step'
-            : 'route'
-          : 'router'
+      : parts[0] === 'r'
+        ? parts[2] === 's'
+          ? 'step'
+          : 'route'
+        : 'router'
   const ri = parts[0] === 'r' ? Number(parts[1]) : -1
   const go = (lv: string) => {
     if (lv === 'router') goto('/')
@@ -293,19 +307,32 @@ function Topbar({ onSearch }: { onSearch: () => void }) {
             ]}
           />
         </div>
-        {scope.services > 0 && (
+        {((data.deps?.length ?? 0) > 1 || scope.services > 0) && (
           <div className="flex items-center gap-1.5">
             <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">surface</span>
             <Segmented
-              value={parts[0] === 'rpc' ? 'rpc' : 'http'}
-              onChange={(v) => goto(v === 'rpc' ? '/rpc' : '/')}
+              value={parts[0] === 'rpc' ? 'rpc' : parts[0] === 'deps' ? 'deps' : 'http'}
+              onChange={(v) => goto(v === 'rpc' ? '/rpc' : v === 'deps' ? '/deps' : '/')}
               options={[
                 { value: 'http', label: 'http', title: `${scope.routes} routes` },
-                {
-                  value: 'rpc',
-                  label: `rpc ${scope.rpcs}`,
-                  title: `${scope.services} services · ${scope.rpcs} methods`,
-                },
+                ...(scope.services > 0
+                  ? [
+                      {
+                        value: 'rpc',
+                        label: `rpc ${scope.rpcs}`,
+                        title: `${scope.services} services · ${scope.rpcs} methods`,
+                      },
+                    ]
+                  : []),
+                ...((data.deps?.length ?? 0) > 1
+                  ? [
+                      {
+                        value: 'deps',
+                        label: `deps ${data.deps!.length}`,
+                        title: `${data.deps!.length} packages · ${new Set(data.deps!.flatMap((p) => p.by ?? [])).size} services`,
+                      },
+                    ]
+                  : []),
               ]}
             />
           </div>
@@ -422,7 +449,7 @@ function Shell() {
           <Outlet />
         </div>
         <div className="border-line text-faint shrink-0 border-t px-4 py-1 text-[10px] leading-4">
-          click any box to open it · right-click for actions · esc goes back · ⌘K searches
+          click any node to open it · right-click for actions · esc goes back · ⌘K searches
         </div>
         {toast && (
           <div
@@ -538,16 +565,22 @@ function GraphPage({
   scene,
   card,
   children,
+  focusId,
+  locate,
+  onExpand,
 }: {
   scene: Scene
   card: React.ReactNode
   children?: React.ReactNode
+  focusId?: string
+  locate?: number
+  onExpand?: (id: string) => void
 }) {
   return (
     <div className="flex h-full flex-col">
       {card}
       <div className="relative min-h-0 flex-1">
-        <SceneCanvas scene={scene} />
+        <SceneCanvas scene={scene} focusId={focusId} locate={locate} onExpand={onExpand} />
       </div>
       {children && (
         <div className="border-line bg-panel/30 max-h-[44vh] shrink-0 overflow-auto border-t">
@@ -1397,10 +1430,7 @@ function RouterView() {
   const params = useParams({ strict: false }) as { _splat?: string }
   const focus = params._splat ?? ''
   const [proto, setProto] = useState<'all' | 'http' | 'ws' | 'sse'>('all')
-  const scene = useMemo(
-    () => buildRouterScene(data, focus, proto, svc),
-    [data, focus, proto, svc],
-  )
+  const scene = useMemo(() => buildRouterScene(data, focus, proto, svc), [data, focus, proto, svc])
   const label = focus ? '/' + focus : data.repo
   const count = data.routes.filter(
     (r) =>
@@ -2153,6 +2183,287 @@ function RPCMethodView() {
   )
 }
 
+/* ---------- dependencies ---------- */
+
+function DepRow({ p, deps, full }: { p: string; deps: Dep[]; full?: boolean }) {
+  const dep = deps.find((d) => d.p === p)
+  return (
+    <AppLink
+      href={depsHref(p, full)}
+      className="hover:bg-panel2 flex items-center justify-between gap-3 rounded-[3px] px-1 py-1 transition-colors"
+    >
+      <span className="text-ink shrink-0 font-mono text-[10.5px]">
+        {dep ? (dep.m ? dep.e || dep.n : dep.n) : p}
+      </span>
+      <span className="text-faint min-w-0 truncate font-mono text-[9px]">{p}</span>
+    </AppLink>
+  )
+}
+
+function DepDetail({
+  dep,
+  deps,
+  full,
+  onLocate,
+}: {
+  dep: Dep
+  deps: Dep[]
+  full?: boolean
+  onLocate?: () => void
+}) {
+  const importers = deps.filter((d) => (d.i ?? []).includes(dep.p))
+  const direct = dep.dr ?? []
+  return (
+    <div className="space-y-4 text-[11px]">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-faint text-[10px]">
+          click an import or importer to select that package; use locate to bring it into view.
+        </p>
+        {onLocate && (
+          <button
+            type="button"
+            onClick={onLocate}
+            className="border-line2 text-mut hover:border-acc/60 hover:text-acc flex shrink-0 items-center gap-1 rounded-[5px] border px-2 py-1 text-[10px]"
+          >
+            <LocateFixed className="size-3" /> locate
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1">
+        {dep.m && <Badge variant="accent">entry point</Badge>}
+        {(dep.by ?? []).map((s) => (
+          <Badge key={s} variant="info">
+            {s}
+          </Badge>
+        ))}
+        {!dep.m && !(dep.by?.length ?? 0) && <Badge variant="warn">unused</Badge>}
+        {(dep.by?.length ?? 0) > 1 && <Badge variant="accent">shared</Badge>}
+      </div>
+
+      <div className="text-mut grid gap-1.5 font-mono text-[10.5px]">
+        <div>
+          <span className="text-faint">dir </span>
+          {dep.d || '.'}
+        </div>
+        <div>
+          <span className="text-faint">files </span>
+          {dep.files} · <span className="text-faint">funcs </span>
+          {dep.fn ?? 0}
+        </div>
+      </div>
+
+      <section>
+        <h4 className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">used by</h4>
+        {(dep.by?.length ?? 0) > 0 ? (
+          <div className="border-line/50 divide-line/40 divide-y border-y">
+            {(dep.by ?? []).map((s) => (
+              <div key={s} className="flex items-center gap-2 py-1.5">
+                <span className="text-ink">{s}</span>
+                <Badge variant={direct.includes(s) ? 'accent' : 'plain'}>
+                  {direct.includes(s) ? 'direct' : 'transitive'}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-mut">no entry point reaches this package.</p>
+        )}
+      </section>
+
+      <section>
+        <h4 className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">
+          imports ({(dep.i ?? []).length})
+        </h4>
+        {(dep.i ?? []).length > 0 ? (
+          <div className="border-line/50 divide-line/40 divide-y border-y">
+            {(dep.i ?? []).map((p) => (
+              <DepRow key={p} p={p} deps={deps} full={full} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-mut">no in-repo imports.</p>
+        )}
+      </section>
+
+      <section>
+        <h4 className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">
+          imported by ({importers.length})
+        </h4>
+        {importers.length > 0 ? (
+          <div className="border-line/50 divide-line/40 divide-y border-y">
+            {importers.map((d) => (
+              <DepRow key={d.p} p={d.p} deps={deps} full={full} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-mut">nothing in this repo imports it.</p>
+        )}
+      </section>
+
+      {(dep.x?.length ?? 0) > 0 && (
+        <section>
+          <h4 className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">third-party</h4>
+          <div className="flex flex-wrap gap-1">
+            {(dep.x ?? []).map((m) => (
+              <span
+                key={m}
+                className="border-line2 text-mut rounded-[3px] border px-1.5 py-0.5 font-mono text-[9.5px]"
+              >
+                {m}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <h4 className="text-faint mb-1 text-[9.5px] tracking-[0.14em] uppercase">files</h4>
+        <ul className="text-mut max-h-52 space-y-0.5 overflow-auto font-mono text-[10px]">
+          {(dep.fs ?? []).map((f) => (
+            <li key={f} className="truncate" title={f}>
+              {f}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+function DepsView() {
+  const data = useData()
+  const svc = useSvc()
+  const search = useSearch({ strict: false }) as { p?: string; all?: string }
+  const [mode, setMode] = useState('repo')
+  const [q, setQ] = useState('')
+  const [locate, setLocate] = useState(0)
+  const [expand, setExpand] = useState<string[]>([])
+  const deps = useMemo(() => data.deps ?? [], [data.deps])
+  const full = search.all === '1'
+
+  const scene = useMemo(
+    () =>
+      buildDepsScene(data, svc, {
+        all: mode === 'all',
+        full,
+        expand,
+        q,
+      }),
+    [data, svc, mode, full, expand, q],
+  )
+
+  // A deep link can point at a package the large-graph cut left out. Reveal it
+  // once without rebuilding the layout on every click.
+  useEffect(() => {
+    const p = search.p
+    if (!p || !deps.some((d) => d.p === p)) return
+    if (scene.nodes.some((n) => n.id === p)) return
+    setExpand((ids) => (ids.includes(p) ? ids : [...ids, p]))
+  }, [search.p, deps, scene.nodes])
+  const services = useMemo(() => [...new Set(deps.flatMap((d) => d.by ?? []))].sort(), [deps])
+  const scoped = useMemo(() => deps.filter((d) => !svc || (d.by ?? []).includes(svc)), [deps, svc])
+  const unused = useMemo(() => scoped.filter((d) => !d.m && !(d.by?.length ?? 0)), [scoped])
+  const selected = search.p ? deps.find((d) => d.p === search.p) : undefined
+  const limited = !full && !q.trim() && scoped.length > 50
+
+  const href = (p?: string, all = full) => {
+    const params = new URLSearchParams()
+    if (p) params.set('p', p)
+    if (all) params.set('all', '1')
+    const query = params.toString()
+    return query ? `/deps?${query}` : '/deps'
+  }
+
+  const reset = () => {
+    setExpand([])
+    goto('/deps')
+  }
+
+  if (!deps.length)
+    return <div className="text-mut p-6 text-[12px]">no packages were indexed for this repo.</div>
+
+  return (
+    <GraphPage
+      scene={scene}
+      focusId={selected?.p}
+      locate={locate}
+      onExpand={(id) => setExpand((ids) => (ids.includes(id) ? ids : [...ids, id]))}
+      card={
+        <>
+          <ScopeCard
+            title="package graph"
+            badge="deps"
+            meta={`${scoped.length} packages · ${services.length} ${services.length === 1 ? 'service' : 'services'} · ${scene.nodes.length} shown · ${scene.edges.length} imports`}
+            note="dots are packages: green internal, blue third-party, amber unused; a larger green dot is a service. hover to trace; drag a dot and its neighbours react; click for its users and imports; SERVICE narrows the graph."
+          />
+          <div className="border-line bg-panel/20 flex flex-wrap items-center gap-2 border-b px-4 py-1.5">
+            <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">graph</span>
+            <Segmented
+              value={mode}
+              onChange={(v) => setMode(v)}
+              options={[
+                { value: 'repo', label: 'in repo' },
+                { value: 'all', label: 'with third-party' },
+              ]}
+            />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="filter package or dir"
+              className="border-line bg-canvas text-ink placeholder:text-faint focus:border-acc/60 h-[24px] w-[190px] rounded-[3px] border px-2 text-[10.5px] outline-none"
+            />
+            {limited && (
+              <Button variant="outline" size="sm" onClick={() => goto(href(search.p, true))}>
+                show full graph
+              </Button>
+            )}
+            {(full || expand.length > 0 || selected) && (
+              <Button variant="ghost" size="sm" onClick={reset}>
+                reset
+              </Button>
+            )}
+            <span className="text-faint ml-auto text-[10px] tabular-nums">
+              {scene.nodes.length} nodes · {scene.edges.length} imports
+              {svc ? ` · ${svc}` : ''}
+            </span>
+          </div>
+          {unused.length > 0 && (
+            <div className="border-line bg-panel/10 flex flex-wrap items-center gap-1.5 border-b px-4 py-1.5">
+              <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">unused</span>
+              {unused.map((d) => (
+                <AppLink
+                  key={d.p}
+                  href={href(d.p)}
+                  className="border-warn/30 text-warn hover:bg-warn/[0.08] rounded-[3px] border px-1.5 py-0.5 font-mono text-[9.5px]"
+                >
+                  {d.n}
+                </AppLink>
+              ))}
+            </div>
+          )}
+        </>
+      }
+    >
+      {selected && (
+        <Sheet
+          open
+          onOpenChange={(v) => !v && goto(href(undefined))}
+          title={selected.m ? selected.e || selected.n : selected.n}
+          subtitle={selected.p}
+        >
+          <DepDetail
+            dep={selected}
+            deps={deps}
+            full={full}
+            onLocate={() => setLocate((n) => n + 1)}
+          />
+        </Sheet>
+      )}
+    </GraphPage>
+  )
+}
+
 /* ---------- router ---------- */
 
 const rootRoute = createRootRoute({ component: Root })
@@ -2179,6 +2490,11 @@ const stageRoute = createRoute({
 const fnRoute = createRoute({ getParentRoute: () => rootRoute, path: '/f', component: FnView })
 const typeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/t', component: TypeView })
 const rpcRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rpc', component: RPCView })
+const depsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/deps',
+  component: DepsView,
+})
 const rpcMethodRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/rpc/$si/$mi',
@@ -2193,6 +2509,7 @@ const routeTree = rootRoute.addChildren([
   fnRoute,
   typeRoute,
   rpcRoute,
+  depsRoute,
   rpcMethodRoute,
 ])
 

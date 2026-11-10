@@ -42,6 +42,18 @@ A repo that holds several services — `jobs/`, `users/`, `projects/`, each with
 
 The page stays unsplit when the split would lie: a route registered outside every entry point's directory keeps one surface, and an entry point that owns no route or RPC (a queue worker, say) is not offered.
 
+## Package dependencies
+
+The **deps** surface draws the repo's Go package graph. Each node is a small dot with the package name underneath, and arrows point from an importer to the package it imports. The layout is a force graph, so related packages settle together instead of forming long columns.
+
+- Nodes are colour-coded: **green** for packages in the repo, **blue** for third-party modules, **amber** for a package no entry point reaches. A **service** is a larger green dot named after the `func main` entry point.
+- The graph stays spare on purpose: file counts, functions, services and imports are in the sheet, opened by clicking a dot. The sheet shows which services reach the package, direct or transitive, so it answers which service uses which package.
+- Hovering a dot dims everything else and lights its importers and imports. Dragging a dot reheats the force layout, so its neighbours move with it; holding still lets it cool, and releasing lets the graph settle back together instead of leaving a package stranded. Clicking a package opens the sheet without moving the graph; **locate** in the sheet brings it into view. Clicking an import or importer in the sheet selects that package. Shift-click expands a dot that a large graph has left out, and **reset** returns to the service roots.
+- Reachability walks imports transitively from each `func main`; the SERVICE switcher narrows the graph to one service's subgraph.
+- `in repo` / `with third-party` adds third-party modules from the `go.mod` require blocks as blue dots with dashed arrows.
+- A repo over 50 packages starts two import levels deep. **show full graph** draws the rest; the drawing stays readable because the graph is pannable and dots are draggable.
+- The same graph is in `-json` under `deps`; the page is built from `deps.go`.
+
 ## Limits
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).

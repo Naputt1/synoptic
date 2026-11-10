@@ -115,6 +115,10 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
   const isStage = d.kind === 'stage'
   const isReturn = d.kind === 'return'
   const isInput = d.kind === 'input'
+  const isService = d.kind === 'service'
+  const isExternal = d.kind === 'module' && Boolean(d.external)
+  const dim = Boolean(d.dim)
+  const selected = Boolean(d.selected)
   const clickable = Boolean(d.href)
   const href = typeof d.href === 'string' ? d.href : undefined
   const isLabel = d.kind === 'label'
@@ -203,14 +207,93 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
     )
   }
 
+  // Dependency graph: a small dot with the package name underneath. Everything
+  // else lives in the detail sheet, so the graph stays as light as Vitest's.
+  if (d.kind === 'module' || d.kind === 'service') {
+    const ext = isExternal
+    const size = (d.w as number) ?? (isService ? 20 : ext ? 12 : 14)
+    const dot = isService
+      ? 'border-acc bg-acc/90 shadow-[0_0_14px_-2px_rgba(88,224,183,0.9)]'
+      : d.unused
+        ? 'border-warn/80 bg-warn/75'
+        : ext
+          ? 'border-info/50 bg-info/45'
+          : 'border-acc/70 bg-acc/55'
+    const label = isService
+      ? 'text-acc font-semibold'
+      : ext
+        ? 'text-info/90'
+        : d.unused
+          ? 'text-warn/90'
+          : 'text-ink'
+    return (
+      <CardMenu data={d}>
+        <motion.div
+          initial={reduce ? false : { opacity: 0, scale: 0.6 }}
+          animate={{ opacity: dim ? 0.12 : 1, scale: 1 }}
+          transition={{
+            duration: dim ? 0.14 : 0.24,
+            delay: dim ? 0 : Math.min((d.index ?? 0) * 0.008, 0.25),
+            ease: [0.22, 0.7, 0.3, 1],
+          }}
+          style={{ width: size, height: size }}
+          title={d.full}
+          role="button"
+          tabIndex={0}
+          aria-label={`${d.title}${isService ? ' service' : ext ? ' third-party module' : ' package'}`}
+          onContextMenu={(e) => e.stopPropagation()}
+          className={`group relative ${clickable ? 'cursor-pointer' : ''}`}
+        >
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="l"
+            style={{ opacity: 0, pointerEvents: 'none' }}
+          />
+          <Handle
+            type="source"
+            position={Position.Right}
+            id="r"
+            style={{ opacity: 0, pointerEvents: 'none' }}
+          />
+          <Handle
+            type="target"
+            position={Position.Top}
+            id="t"
+            style={{ opacity: 0, pointerEvents: 'none' }}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id="b"
+            style={{ opacity: 0, pointerEvents: 'none' }}
+          />
+          <span
+            aria-hidden
+            className={`absolute inset-0 rounded-full border transition-transform group-hover:scale-125 ${dot} ${
+              selected ? 'ring-ink/80 ring-2 ring-offset-2 ring-offset-[#071417]' : ''
+            }`}
+          />
+          <span
+            className={`bg-canvas/70 absolute top-full left-1/2 mt-1 max-w-[170px] -translate-x-1/2 truncate rounded-[3px] px-1 text-[10.5px] leading-[15px] ${label} ${
+              selected ? 'bg-canvas text-ink' : ''
+            }`}
+          >
+            {d.title}
+          </span>
+        </motion.div>
+      </CardMenu>
+    )
+  }
+
   return (
     <CardMenu data={d}>
       <motion.div
         initial={reduce ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
+        animate={{ opacity: dim ? 0.14 : 1 }}
         transition={{
-          duration: 0.24,
-          delay: Math.min((d.index ?? 0) * 0.018, 0.5),
+          duration: dim ? 0.14 : 0.24,
+          delay: dim ? 0 : Math.min((d.index ?? 0) * 0.018, 0.5),
           ease: [0.22, 0.7, 0.3, 1],
         }}
         style={{ width: (d.w as number) ?? 380, height: (d.h as number) ?? 84 }}
@@ -231,6 +314,7 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
                 ? 'border-line2 bg-panel2'
                 : 'border-line bg-panel',
           clickable ? 'cursor-pointer transition-colors hover:border-acc/60 hover:bg-panel2' : '',
+          selected ? 'ring-1 ring-acc/60' : '',
         ].join(' ')}
       >
         <Handle type="target" position={Position.Top} id="t" />

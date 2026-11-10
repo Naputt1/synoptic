@@ -1,6 +1,16 @@
-import type { Edge, Node } from '@xyflow/react'
+import { type Edge, MarkerType, type Node } from '@xyflow/react'
+import {
+  forceCenter,
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  forceX,
+  forceY,
+  type SimulationNodeDatum,
+} from 'd3-force'
 
-import { msOf, routeHref, segments, stageHref, tagLabel, touchTags } from '../lib/data'
+import { depsHref, msOf, routeHref, segments, stageHref, tagLabel, touchTags } from '../lib/data'
 import { codesOf } from '../lib/status'
 import type { Data, FuncFlow, Route, RouteTiming } from '../lib/types'
 
@@ -18,6 +28,8 @@ export type NodeKind =
   | 'input'
   | 'note'
   | 'label'
+  | 'module'
+  | 'service'
 
 export type SData = {
   kind: NodeKind
@@ -46,6 +58,18 @@ export type SData = {
   ms?: string
   /** trace overlay: 0..1 share of the route's summed time */
   share?: number
+  /** dependency graph: the services whose imports reach this package */
+  by?: string[]
+  /** dependency graph: no entry point reaches this package */
+  unused?: boolean
+  /** dependency graph: a third-party module rather than an in-repo package */
+  external?: boolean
+  /** dependency graph: faded because another node is hovered or focused */
+  dim?: boolean
+  /** dependency graph: the package open in the sheet */
+  selected?: boolean
+  /** ambiguous interface call: concrete implementations to choose from */
+  impls?: { n: string; r?: string; p?: string; href: string }[]
 } & Record<string, unknown>
 
 export type SNode = Node<SData, 'scene'>
@@ -514,4 +538,243 @@ export function buildPipelineScene(
   }
 
   return { nodes, edges, key: 'pipe:' + ri }
+}
+
+const moduleName = (mod: string) => {
+  const parts = mod.split('/')
+  const last = parts[parts.length - 1] ?? mod
+  return /^v\d+$/.test(last) ? (parts[parts.length - 2] ?? last) : last
+}
+
+type DepSceneOpts = {
+  all?: boolean
+  full?: boolean
+  expand?: string[]
+  q?: string
+}
+
+type ForceNode = SimulationNodeDatum & { id: string; r: number }
+
+const DEP_LIMIT = 50
+
+/** A small deterministic PRNG so a force layout does not shuffle between renders. */
+const seeded = (seed: number) => {
+  let state = seed >>> 0
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0
+    return state / 4294967296
+  }
+}
+
+/** Level 3: the package graph, laid out with a force simulation. */
+export function buildDepsScene(d: Data, svc = '', opts: DepSceneOpts = {}): Scene {
+  const { all = false, full = false, expand = [], q = '' } = opts
+  const packages = (d.deps ?? []).filter((p) => !svc || (p.by ?? []).includes(svc))
+  const byId = new Map(packages.map((p) => [p.p, p]))
+  const needle = q.trim().toLowerCase()
+  const roots = packages.filter((p) => p.m)
+
+  // Large graphs start two import levels deep, like Vitest's module graph;
+  // small ones show everything. "Show full graph" lifts the limit.
+  const visible = new Set<string>()
+  if (needle) {
+    for (const p of packages) {
+      if (`${p.p} ${p.n} ${p.d ?? ''}`.toLowerCase().includes(needle)) visible.add(p.p)
+    }
+    const hit = new Set([...visible].flatMap((id) => byId.get(id)?.by ?? []))
+    for (const p of packages) {
+      if (!p.m) continue
+      const names = (p.e ?? '').split(/,\s*/).filter(Boolean)
+      if (names.some((n) => hit.has(n))) visible.add(p.p)
+    }
+  } else if (full || packages.length <= DEP_LIMIT) {
+    for (const p of packages) visible.add(p.p)
+  } else {
+    const queue: Array<[string, number]> = roots.map((p) => [p.p, 0])
+    for (const [id] of queue) visible.add(id)
+    for (let i = 0; i < queue.length; i++) {
+      const [id, depth] = queue[i]
+      if (depth >= 2) continue
+      for (const imp of byId.get(id)?.i ?? []) {
+        if (!byId.has(imp) || visible.has(imp)) continue
+        visible.add(imp)
+        queue.push([imp, depth + 1])
+      }
+    }
+  }
+  for (const id of expand) {
+    const p = byId.get(id)
+    if (!p) continue
+    visible.add(id)
+    for (const imp of p.i ?? []) if (byId.has(imp)) visible.add(imp)
+    for (const other of packages) if ((other.i ?? []).includes(id)) visible.add(other.p)
+  }
+  const shown = packages.filter((p) => visible.has(p.p))
+  const ext = new Set<string>()
+  if (all) {
+    for (const p of shown) for (const mod of p.x ?? []) ext.add(mod)
+  }
+
+  const ids = [...shown.map((p) => p.p), ...[...ext].map((m) => 'x:' + m)]
+  const links: Array<{ source: string; target: string; thirdParty: boolean }> = []
+  for (const p of shown) {
+    for (const imp of p.i ?? []) {
+      if (visible.has(imp)) links.push({ source: p.p, target: imp, thirdParty: false })
+    }
+    for (const mod of p.x ?? []) {
+      if (all) links.push({ source: p.p, target: 'x:' + mod, thirdParty: true })
+    }
+  }
+
+  const titleOf = (id: string) => {
+    const p = byId.get(id)
+    if (p) return p.m ? p.e || p.n : p.n
+    return moduleName(id.slice(2)).toLowerCase()
+  }
+  const rank = (p?: { m?: boolean }) => (p?.m ? 0 : p ? 1 : 2)
+  ids.sort((a, b) => {
+    const ra = rank(byId.get(a))
+    const rb = rank(byId.get(b))
+    return ra - rb || titleOf(a).localeCompare(titleOf(b))
+  })
+
+  const forceNodes: ForceNode[] = ids.map((id, i) => {
+    const angle = i * 2.399963229728653
+    const radius = Math.sqrt(i + 0.5) * 92
+    const title = titleOf(id)
+    // the circle itself is tiny; keep room for the name printed under it
+    const r = 18 + Math.min(72, title.length * 2.6) + (byId.get(id)?.m ? 8 : 0)
+    return { id, r, x: Math.cos(angle) * radius, y: Math.sin(angle) * radius }
+  })
+
+  const endpoint = (v: string | number | ForceNode) =>
+    typeof v === 'string' ? v : typeof v === 'number' ? String(v) : v.id
+  const thirdPartyLink = (l: {
+    source: string | number | ForceNode
+    target: string | number | ForceNode
+  }) => endpoint(l.source).startsWith('x:') || endpoint(l.target).startsWith('x:')
+
+  let minX = Infinity
+  let minY = Infinity
+  if (forceNodes.length > 0) {
+    const linked = new Set(links.flatMap((l) => [l.source, l.target]))
+    forceSimulation<ForceNode>(forceNodes)
+      .randomSource(seeded(7))
+      .force(
+        'link',
+        forceLink<ForceNode, { source: string; target: string }>(
+          links.map(({ source, target }) => ({ source, target })),
+        )
+          .id((n) => n.id)
+          .distance((l) => {
+            if (thirdPartyLink(l)) return 62
+            const s = endpoint(l.source)
+            const t = endpoint(l.target)
+            return byId.get(s)?.m || byId.get(t)?.m ? 108 : 82
+          })
+          .strength((l) => (thirdPartyLink(l) ? 0.35 : 0.84)),
+      )
+      .force(
+        'charge',
+        forceManyBody<ForceNode>()
+          .strength((n) => (linked.has(n.id) ? -360 : -90))
+          .distanceMax(1400),
+      )
+      .force('collide', forceCollide<ForceNode>((n) => n.r).iterations(3))
+      .force('center', forceCenter(0, 0))
+      .force(
+        'x',
+        forceX<ForceNode>(0).strength((n) => (linked.has(n.id) ? 0.025 : 0.14)),
+      )
+      .force(
+        'y',
+        forceY<ForceNode>(0).strength((n) => (linked.has(n.id) ? 0.025 : 0.14)),
+      )
+      .stop()
+      .tick(300)
+
+    for (const n of forceNodes) {
+      // The labels need horizontal room, not a tall circle: flatten the
+      // simulation so a wide screen can show the whole graph at a readable size.
+      n.y = (n.y ?? 0) * 0.62
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) {
+        n.x = 0
+        n.y = 0
+      }
+      minX = Math.min(minX, n.x ?? 0)
+      minY = Math.min(minY, n.y ?? 0)
+    }
+  }
+  const pos = new Map(
+    forceNodes.map((n) => [n.id, { x: (n.x ?? 0) - minX + 40, y: (n.y ?? 0) - minY + 40 }]),
+  )
+
+  const nodes: SNode[] = []
+  for (const id of ids) {
+    const at = pos.get(id) ?? { x: 0, y: 0 }
+    if (id.startsWith('x:')) {
+      const mod = id.slice(2)
+      const span = 12
+      nodes.push(
+        node(
+          id,
+          at.x - span / 2,
+          at.y - span / 2,
+          {
+            kind: 'module',
+            title: moduleName(mod),
+            full: mod,
+            external: true,
+          },
+          span,
+          span,
+        ),
+      )
+      continue
+    }
+    const p = byId.get(id)
+    if (!p) continue
+    const span = p.m ? 20 : 14
+    nodes.push(
+      node(
+        id,
+        at.x - span / 2,
+        at.y - span / 2,
+        {
+          kind: p.m ? 'service' : 'module',
+          title: p.m ? p.e || p.n : p.n,
+          full: p.p,
+          unused: !p.m && (p.by ?? []).length === 0,
+          href: depsHref(p.p, full),
+        },
+        span,
+        span,
+      ),
+    )
+  }
+
+  const depEdge = (from: string, to: string, thirdParty: boolean): SEdge => ({
+    id: `${from}->${to}`,
+    source: from,
+    target: to,
+    type: 'dep',
+    style: {
+      stroke: thirdParty ? '#3f6b78' : '#4a7f8a',
+      strokeWidth: 1.1,
+      strokeDasharray: thirdParty ? '4 3' : undefined,
+      opacity: thirdParty ? 0.55 : 0.7,
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: thirdParty ? '#3f6b78' : '#4a7f8a',
+      width: 9,
+      height: 9,
+    },
+  })
+
+  return {
+    nodes,
+    edges: links.map((l) => depEdge(l.source, l.target, l.thirdParty)),
+    key: `deps:${svc}:${all ? 'all' : 'repo'}:${full ? 'full' : 'auto'}:${expand.join(',')}:${needle}`,
+  }
 }

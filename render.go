@@ -81,6 +81,7 @@ type JData struct {
 	Services []JService              `json:"services,omitempty"`
 	Flows    map[string]JFunc        `json:"flows"`
 	Types    map[string]JType        `json:"types,omitempty"`
+	Deps     []JDep                  `json:"deps,omitempty"`
 	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
 }
 
@@ -186,6 +187,7 @@ func buildData(m *Module, routes []*Route) JData {
 	d.Stats.Middleware = len(mw)
 	d.Stats.Packages = len(m.PKG)
 	d.Types = types
+	d.Deps = buildDeps(m)
 	for key, jf := range d.Flows {
 		annotateSteps(jf.Steps, d.Types)
 		d.Flows[key] = jf

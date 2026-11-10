@@ -269,6 +269,22 @@ export type SynType = {
 /** One entry point of a multi-service module, with what it owns. */
 export type Svc = { n: string; d?: string; e?: string; routes: number; rpcs: number }
 
+/** One Go package in the repo graph, with the services whose imports reach it. */
+export type Dep = {
+  p: string
+  n: string
+  d?: string
+  files: number
+  fn?: number
+  i?: string[]
+  x?: string[]
+  by?: string[]
+  dr?: string[]
+  fs?: string[]
+  m?: boolean
+  e?: string
+}
+
 export type Data = {
   repo: string
   mod: string
@@ -279,6 +295,7 @@ export type Data = {
   mw: Middleware[]
   flows: Record<string, FuncFlow>
   types?: Record<string, SynType>
+  deps?: Dep[]
   timing?: Record<string, RouteTiming>
 }
 
