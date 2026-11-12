@@ -26,6 +26,8 @@ export type SData = {
   full?: string
   sub?: string
   badge?: string
+  /** touches a file changed since the -base ref */
+  chg?: boolean
   index?: number
   tags?: string[]
   /** outcome of a return/exit path, shown beside "returns here" */
@@ -135,6 +137,7 @@ export function buildRouterScene(
             curl: r.doc?.curl,
             file: r.f,
             line: r.l,
+            chg: r.chg,
           },
           176,
           58,
@@ -233,6 +236,9 @@ export function buildRouterScene(
             sub: '/' + path,
             badge: String(count),
             href: '/g/' + path,
+            chg: d.routes.some(
+              (r) => active(r) && r.chg && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
+            ),
           },
           176,
           58,
@@ -262,6 +268,9 @@ export function buildRouterScene(
           sub: '/' + path,
           badge: String(count),
           href: '/g/' + path,
+          chg: d.routes.some(
+            (r) => active(r) && r.chg && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
+          ),
         },
         176,
         58,
@@ -439,6 +448,7 @@ export function buildPipelineScene(
           path: r.p,
           method: r.m,
           curl: r.doc?.curl,
+          chg: st.chg,
         },
         380,
         76,

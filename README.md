@@ -13,7 +13,7 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, and the repo must type-check), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, and the repo must type-check), `-base <ref>` (mark routes and stages whose files changed since a git ref; best-effort, never fails the run), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
 
 The default analysis path uses only the Go standard library. `-typed` is the one
 third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
@@ -124,6 +124,59 @@ could not see, and only prints that block when there is something to say:
 The same counters and bounded lists are in the baked JSON under `diag`
 (`parsed`, `skipped`, `read`, `parse`, `generated`, `build`, `skip`, `calls`,
 `resolved`, `unresolved`, `unres`, `truncated`).
+
+## Diagnostics page (`#/diag`)
+
+The counters above have a page: `#/diag`, also linked from the topbar as
+`N blind spots` when either counter is non-zero. It renders the baked `diag`
+data:
+
+- **files** — parsed and skipped counts with the reason breakdown (`read`,
+  `parse`, `generated`, `build`) and up to 20 skipped paths;
+- **calls** — resolved/total, the unresolved count, and up to 20 in-module
+  unresolved calls with their function, expression and `file:line`;
+- **flows** — the truncated count and a link to every baked flow whose expansion
+  stopped at the depth or flow cap.
+
+## Change view (`-base`)
+
+`-base main` marks the routes and stages whose file changed since `main`:
+
+```bash
+go run . -root . -base main -out synoptic.html
+```
+
+The committed part is `git diff --name-only <ref>...HEAD -- '*.go'`, a merge-base
+diff, so a base branch that moved after the fork does not light up every file it
+touched. Uncommitted edits are included too, which is what makes `-base HEAD`
+describe the working tree. Paths stay root-relative.
+
+**Semantics: a badge means "touches a file changed since `<ref>`", not "is a new
+route".** A route is marked when its registration file or any stage file
+changed; a stage is marked when its own file changed. The base tree is never
+analyzed — only file names are read, so routes and flows always describe the
+current tree. The router, route and step views show a `changed` badge, and the
+JSON carries `change: {ref, files, routes}` plus `chg` on each marked route and
+stage.
+
+The feature is best-effort: a missing git, an unknown ref, or a 10-second
+timeout prints a warning and leaves the page without change data. It never fails
+the run.
+
+## Source redaction (`-no-source`)
+
+`-no-source` drops the raw source from the page while keeping everything that
+describes it:
+
+```bash
+go run . -root . -no-source -out synoptic.html
+```
+
+It clears every function body (`s`) and every step's code (`cd`, `cds`) at every
+nesting depth, including `if`/`else` bodies. Docs, file names and line numbers
+stay, so flows, the router and the documentation panel render as usual. The
+source sheet says `source omitted (built with -no-source)` instead of showing an
+empty viewer, and the JSON carries `redact: true`.
 
 ## Typed mode (`-typed`)
 

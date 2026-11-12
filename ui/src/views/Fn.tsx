@@ -78,6 +78,7 @@ export function FnView() {
           }
           doc={flow.d}
           note={!flow.d ? 'no doc comment on this one — the flow below is what it does' : undefined}
+          tags={flow.trunc ? ['truncated'] : undefined}
           onSource={openSource}
           sourceLabel="source"
           rpc={rpc}

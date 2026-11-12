@@ -59,7 +59,11 @@ export function FlowView() {
                 : 'no doc comment, and the body is outside this repo'
               : undefined
           }
-          tags={touchTags(st)}
+          tags={[
+            ...touchTags(st),
+            ...(st.chg ? ['changed'] : []),
+            ...(flow?.trunc ? ['truncated'] : []),
+          ]}
           onSource={openSource}
           sourceLabel="source"
         />
