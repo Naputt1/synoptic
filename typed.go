@@ -57,6 +57,7 @@ func resolveTypedCalls(m *Module, root string) (resolved int, err error) {
 		}
 	}
 	if len(index) == 0 {
+		m.recount()
 		return 0, nil
 	}
 
@@ -117,6 +118,10 @@ func resolveTypedCalls(m *Module, root string) (resolved int, err error) {
 			})
 		}
 	}
+
+	// Typed targets change what counts as resolved, so the honest metric must
+	// be rebuilt from the calls, not decremented by hand.
+	m.recount()
 
 	if len(problems) > 0 {
 		sort.Strings(problems)
