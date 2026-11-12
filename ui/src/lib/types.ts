@@ -138,6 +138,8 @@ export type Route = {
   st?: StreamInfo
   ch: Stage[]
   doc?: Doc
+  /** added since the base ref */
+  new?: boolean
   chg?: boolean
 }
 
@@ -315,11 +317,26 @@ export type UnresolvedCall = {
   r?: string
 }
 
-/** The -base view: the ref compared against, and what it touched. */
+/** A route in the -base diff, without its chain. */
+export type ChangeRoute = {
+  m: string
+  p: string
+  svc: string
+}
+
+/** A route that kept its identity but changed inside. */
+export type ChangeMod = ChangeRoute & {
+  why: string[]
+}
+
+/** The -base view: the ref compared against, the files it touched, and the route diff. */
 export type Change = {
   ref: string
   files: number
   routes: number
+  added?: ChangeRoute[]
+  removed?: ChangeRoute[]
+  modified?: ChangeMod[]
 }
 
 export type Data = {

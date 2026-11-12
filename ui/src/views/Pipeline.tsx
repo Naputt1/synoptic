@@ -35,7 +35,8 @@ export function PipelineView() {
   const handler = r.ch[r.ch.length - 1]
   const mw = r.ch.filter((s) => (s.r ?? '') === 'middleware').length
   const tags = [...new Set(r.ch.flatMap((s) => touchTags(s, false)))]
-  if (r.chg) tags.push('changed')
+  if (r.new) tags.push('new')
+  else if (r.chg) tags.push('changed')
   const current = sheet !== null ? r.ch[sheet] : undefined
   const flow = current?.fk ? flowOf(data, current.fk) : undefined
   const slow = timing && timing.slow >= 0 ? timing.st.find((x) => x.i === timing.slow) : undefined

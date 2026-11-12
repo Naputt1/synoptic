@@ -22,7 +22,7 @@ func main() {
 	html := flag.Bool("html", true, "write the html page; -html=false prints the console report only")
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
 	typed := flag.Bool("typed", false, "type-check the repo to resolve calls the AST pass misses (slower; adds golang.org/x/tools; the repo must resolve its imports)")
-	base := flag.String("base", "", "mark routes and stages whose files changed since this git ref (best-effort; the base tree is not analyzed)")
+	base := flag.String("base", "", "diff routes against this git ref: added, removed and modified, plus file-touch marks (best-effort; the base tree is analyzed read-only)")
 	noSource := flag.Bool("no-source", false, "omit raw source from the page, keeping docs, files and line numbers")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -55,14 +55,7 @@ func main() {
 	d := buildData(m, routes)
 	attachServices(m, &d, services)
 	if *base != "" {
-		changed, err := changedFiles(m.Root, *base)
-		if err != nil {
-			// The change view is a convenience: a missing git, a bad ref or a
-			// tree that is not a repo must not take the page down.
-			fmt.Fprintf(os.Stderr, "base: %v (no change data)\n", err)
-		} else {
-			markChanges(&d, changed, *base)
-		}
+		applyBaseView(&d, m.Root, *base, os.Stderr)
 	}
 	if *trace != "" {
 		tm, err := buildTiming(*trace, routes)

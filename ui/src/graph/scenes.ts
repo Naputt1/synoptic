@@ -26,7 +26,9 @@ export type SData = {
   full?: string
   sub?: string
   badge?: string
-  /** touches a file changed since the -base ref */
+  /** added since the -base ref */
+  new?: boolean
+  /** touches a file changed since the -base ref, or differs from it */
   chg?: boolean
   index?: number
   tags?: string[]
@@ -137,6 +139,7 @@ export function buildRouterScene(
             curl: r.doc?.curl,
             file: r.f,
             line: r.l,
+            new: r.new,
             chg: r.chg,
           },
           176,
@@ -192,6 +195,15 @@ export function buildRouterScene(
   const routesByDepth = new Map<number, number[]>()
   const parentOf = new Map<string, string>()
 
+  // A group is new only when every route under it is new; one old route makes
+  // it a changed group, not an added one.
+  const groupNew = (path: string) => {
+    const under = d.routes.filter(
+      (r) => active(r) && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
+    )
+    return under.length > 0 && under.every((r) => r.new)
+  }
+
   d.routes.forEach((r, i) => {
     if (!active(r)) return
     const s = segments(r.p)
@@ -236,6 +248,7 @@ export function buildRouterScene(
             sub: '/' + path,
             badge: String(count),
             href: '/g/' + path,
+            new: groupNew(path),
             chg: d.routes.some(
               (r) => active(r) && r.chg && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
             ),
@@ -268,6 +281,7 @@ export function buildRouterScene(
           sub: '/' + path,
           badge: String(count),
           href: '/g/' + path,
+          new: groupNew(path),
           chg: d.routes.some(
             (r) => active(r) && r.chg && (r.p === '/' + path || r.p.startsWith('/' + path + '/')),
           ),

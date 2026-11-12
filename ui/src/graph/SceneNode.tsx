@@ -288,13 +288,22 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
                 {d.sub}
               </span>
             )}
-            {d.chg && (
+            {d.new ? (
               <span
-                title="touches a file changed since the base ref"
-                className="border-warn/45 text-warn shrink-0 rounded-[3px] border px-1 text-[9px] tracking-[0.1em] uppercase"
+                title="added since the base ref"
+                className="border-acc/45 text-acc shrink-0 rounded-[3px] border px-1 text-[9px] tracking-[0.1em] uppercase"
               >
-                changed
+                new
               </span>
+            ) : (
+              d.chg && (
+                <span
+                  title="differs from the base ref"
+                  className="border-warn/45 text-warn shrink-0 rounded-[3px] border px-1 text-[9px] tracking-[0.1em] uppercase"
+                >
+                  changed
+                </span>
+              )
             )}
             {(d.tags ?? []).map((t) => (
               <Tag key={t} t={t} />
