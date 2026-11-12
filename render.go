@@ -523,7 +523,7 @@ func dirOf(p string) string {
 	return "."
 }
 
-func report(d JData, out string) {
+func report(d JData, htmlPath, jsonPath string) {
 	fmt.Printf("%s\n", d.Repo)
 	fmt.Printf("  routes     %d\n", d.Stats.Routes)
 	fmt.Printf("  groups     %d\n", d.Stats.Groups)
@@ -578,5 +578,12 @@ func report(d JData, out string) {
 	if g.Truncated > 0 {
 		fmt.Printf("  flows      %d truncated at depth/limit\n", g.Truncated)
 	}
-	fmt.Printf("  written to %s\n", out)
+	if htmlPath != "" {
+		fmt.Printf("  written to %s\n", htmlPath)
+	} else {
+		fmt.Println("  no HTML written (-html=false)")
+	}
+	if jsonPath != "" {
+		fmt.Printf("  json       %s\n", jsonPath)
+	}
 }

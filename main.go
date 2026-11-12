@@ -17,13 +17,13 @@ var version = "dev"
 
 func main() {
 	root := flag.String("root", ".", "repository root to read")
-	out := flag.String("out", "", "output html file")
-	js := flag.String("json", "", "also write the raw data as json (for the dev UI)")
-	html := flag.Bool("html", true, "write the html page")
+	out := flag.String("out", "", "output html file (default <root>/synoptic.html)")
+	js := flag.String("json", "", "also write the raw data as json; the report names the file")
+	html := flag.Bool("html", true, "write the html page; -html=false prints the console report only")
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
-	typed := flag.Bool("typed", false, "use the Go type checker to resolve calls the AST pass misses (slower; the repo must type-check)")
-	base := flag.String("base", "", "git ref to compare against: mark routes whose files changed since <ref> (best-effort)")
-	noSource := flag.Bool("no-source", false, "omit source code from the page, keeping docs, files and line numbers")
+	typed := flag.Bool("typed", false, "type-check the repo to resolve calls the AST pass misses (slower; adds golang.org/x/tools; the repo must resolve its imports)")
+	base := flag.String("base", "", "mark routes and stages whose files changed since this git ref (best-effort; the base tree is not analyzed)")
+	noSource := flag.Bool("no-source", false, "omit raw source from the page, keeping docs, files and line numbers")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -82,7 +82,7 @@ func main() {
 		}
 	}
 	if !*html {
-		report(d, *js)
+		report(d, "", *js)
 		return
 	}
 	if *out == "" {
@@ -92,5 +92,5 @@ func main() {
 		fmt.Fprintln(os.Stderr, "write:", err)
 		os.Exit(1)
 	}
-	report(d, *out)
+	report(d, *out, *js)
 }
