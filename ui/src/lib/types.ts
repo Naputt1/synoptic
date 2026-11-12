@@ -283,7 +283,20 @@ export type Diag = {
   skip?: SkippedFile[]
   calls: number
   resolved: number
+  /** Blind only: an in-module function the index does not hold. */
   unresolved: number
+  /** Calls whose target package is outside this module. */
+  ext?: number
+  /** Type conversions, not calls. */
+  conv?: number
+  /** Calls through a function value, with no static target. */
+  dyn?: number
+  /** Interface fields with more than one implementation. */
+  amb?: number
+  /** Method chains whose receiver type is not indexed. */
+  unk?: number
+  /** Every call counted once by reason. */
+  why?: Record<string, number>
   unres?: UnresolvedCall[]
   truncated?: number
 }
@@ -298,6 +311,8 @@ export type UnresolvedCall = {
   e: string
   f?: string
   l?: number
+  /** Always `blind`: the in-module reason no target was found. */
+  r?: string
 }
 
 /** The -base view: the ref compared against, and what it touched. */

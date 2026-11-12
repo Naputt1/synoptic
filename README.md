@@ -33,9 +33,17 @@ go build ./...
 pkgs=$(go list ./... | grep -v '/node_modules/')
 go vet $pkgs
 go test $pkgs
+./scripts/check-floor.sh
 ```
 
-`make check` runs both halves, and `make build` builds the UI and then the binary.
+`make check` runs both halves plus the Go floor check, and `make build` builds the UI and then the binary.
+
+Go 1.26 or newer is required: `go.mod` declares `go 1.26.0` because the optional
+`-typed` mode depends on `golang.org/x/tools` v0.52.0, whose own module requires
+Go 1.26. `go.floor` records the supported floor (`1.26`) and
+`scripts/check-floor.sh` fails when the `go` directive no longer starts with it,
+so a future bump is a reviewed change instead of a silent Renovate side effect.
+CI runs the same check.
 
 ## Performance
 
@@ -99,11 +107,10 @@ The console report (`-html=false`, or any run) also counts what the analyzer
 could not see, and only prints that block when there is something to say:
 
 ```
-  files      128 parsed, 1 skipped (parse 1)
-             - internal/broken.go (parse)
-  calls      940/952 resolved (12 in-module unresolved)
-             - Handler.Create: svc.Store (handler.go:42)
-  flows      3 truncated at depth/limit
+  files      124 parsed, 0 skipped
+  calls      1457 total: 141 resolved, 324 external, 24 convert, 34 builtin, 0 blind, 0 dynamic, 0 ambiguous, 934 unknown
+             honest 141/1075 = 13.1% (external, convert and builtin are not blind spots)
+  flows      2 truncated at depth/limit
 ```
 
 - **files** — every `.go` file that failed to read or parse, that was skipped
@@ -112,18 +119,28 @@ could not see, and only prints that block when there is something to say:
   such as `_windows.go`) are never parsed, so a route declared there cannot
   appear as a phantom route on the page. The page omits all skipped files
   entirely, so anything declared there is invisible by design.
-- **calls** — calls are counted per function and deduplicated by expression. A
-  call counts as *in-module unresolved* only when it should have resolved here:
-  a package path belongs to this module, or it is a bare identifier absent from
-  the file's package (Go builtins excluded). Stdlib and framework calls are not
-  blind spots. The top unresolved expressions are listed with file and line.
+- **calls** — every call gets one reason. `resolved` has a target inside this
+  module; `external` targets a package outside it; `convert` is a type
+  conversion (`string(x)`, `UserID(x)`); `builtin` is a language function
+  (`len`, `append`); `blind` is a bare or package-qualified in-module function
+  the index does not hold; `dynamic` goes through a function value (parameter,
+  local, package variable or func-typed field); `ambiguous` is an interface
+  field with more than one implementation; `unknown` is a method chain whose
+  receiver type is not indexed (`config.DB.Exec`). Only `blind` is a real
+  in-module gap. The honest percentage is `resolved / (resolved + blind +
+  dynamic + ambiguous + unknown)`; external calls, conversions and builtins are
+  excluded because their targets are not in this module. Calls are counted per
+  function and deduplicated by expression; up to 20 blind expressions are
+  listed with file and line.
 - **flows** — flow expansion stops at depth 3 and at 1400 baked functions.
   Baked flows cut by the depth cap carry `trunc` in the JSON data, and the
   report counts every flow skipped at the cap.
 
 The same counters and bounded lists are in the baked JSON under `diag`
 (`parsed`, `skipped`, `read`, `parse`, `generated`, `build`, `skip`, `calls`,
-`resolved`, `unresolved`, `unres`, `truncated`).
+`resolved`, `unresolved`, `ext`, `conv`, `dyn`, `amb`, `unk`, `why`, `unres`,
+`truncated`). `unresolved` is the blind count; `unres` lists only blind calls,
+each with its reason.
 
 ## Diagnostics page (`#/diag`)
 
@@ -133,8 +150,10 @@ data:
 
 - **files** — parsed and skipped counts with the reason breakdown (`read`,
   `parse`, `generated`, `build`) and up to 20 skipped paths;
-- **calls** — resolved/total, the unresolved count, and up to 20 in-module
-  unresolved calls with their function, expression and `file:line`;
+- **calls** — resolved/total, the honest percentage, the reason breakdown
+  (`resolved`, `blind`, `dynamic`, `ambiguous`, `unknown`, `external`,
+  `convert`, `builtin`), and up to 20 blind calls with their function,
+  expression and `file:line`;
 - **flows** — the truncated count and a link to every baked flow whose expansion
   stopped at the depth or flow cap.
 
