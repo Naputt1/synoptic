@@ -180,6 +180,18 @@ could not see, and only prints that block when there is something to say:
   calls, conversions and builtins are excluded because their targets are not in
   this module. Calls are counted per function and deduplicated by expression;
   up to 20 blind expressions are listed with file and line.
+- **interface wiring** — an interface with more than one implementation stays
+  `ambiguous` unless exactly one concrete type is visibly assigned to it. The
+  evidence is syntactic and local to the module: a composite literal setting an
+  interface-typed field, an interface variable declaration or assignment, an
+  explicit conversion (`Service(&Postgres{})`), or a constructor argument paired
+  with an interface parameter. The rule is global, not per call site: if two
+  places assign different implementations to the same interface, the interface
+  stays ambiguous everywhere, because each site may look clear on its own while
+  the module disagrees. A wired type must be declared in the module, declare
+  every interface method, and not be a generated-only stub. Constructor results
+  and other function returns are not followed, so wiring built by a factory
+  (`NewStore() (Store, error)`) stays unknown rather than guessed.
 - **flows** — flow expansion stops at depth 3 and at 1400 baked functions.
   Baked flows cut by the depth cap carry `trunc` in the JSON data, and the
   report counts every flow skipped at the cap.
