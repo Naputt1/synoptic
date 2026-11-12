@@ -466,7 +466,7 @@ func writeHTML(path string, d JData) error {
 		return err
 	}
 	if shellHTML == "" {
-		return errors.New("ui/dist/index.html is missing: run `npm install && npm run build` in ui/")
+		return errors.New("ui/dist/index.html is missing: run `cd ui && bun install && bun run build`")
 	}
 	page := strings.Replace(shellHTML, "</body>",
 		`<script id="synoptic-data" type="application/json">`+string(blob)+`</script></body>`, 1)
