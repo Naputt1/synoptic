@@ -531,7 +531,7 @@ func report(d JData, out string) {
 		for _, r := range []struct {
 			n     int
 			label string
-		}{{g.Parse, "parse"}, {g.Read, "read"}, {g.Generated, "generated"}} {
+		}{{g.Parse, "parse"}, {g.Read, "read"}, {g.Generated, "generated"}, {g.Build, "build"}} {
 			if r.n > 0 {
 				why = append(why, fmt.Sprintf("%s %d", r.label, r.n))
 			}
