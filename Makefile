@@ -1,4 +1,4 @@
-.PHONY: ui build test check run
+.PHONY: ui build test check run floor
 
 # The Go binary embeds ui/dist/index.html, so every Go target needs the UI built.
 ui:
@@ -13,6 +13,10 @@ test: ui
 check: ui
 	cd ui && bun run typecheck && bun run lint
 	pkgs=$$(go list ./... | grep -v '/node_modules/'); go vet $$pkgs && go test $$pkgs
+	scripts/check-floor.sh
+
+floor:
+	scripts/check-floor.sh
 
 run: ui
 	go run . -root .
