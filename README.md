@@ -108,8 +108,8 @@ could not see, and only prints that block when there is something to say:
 
 ```
   files      124 parsed, 0 skipped
-  calls      1457 total: 141 resolved, 324 external, 24 convert, 34 builtin, 0 blind, 0 dynamic, 0 ambiguous, 934 unknown
-             honest 141/1075 = 13.1% (external, convert and builtin are not blind spots)
+  calls      1457 total: 141 resolved, 998 external, 24 convert, 34 builtin, 0 blind, 0 dynamic, 0 ambiguous, 260 unknown
+             honest 141/401 = 35.2% (external, convert and builtin are not blind spots)
   flows      2 truncated at depth/limit
 ```
 
@@ -122,16 +122,20 @@ could not see, and only prints that block when there is something to say:
 - **calls** — every call gets one reason. `resolved` has a target inside this
   module; `external` targets a package outside it; `convert` is a type
   conversion (`string(x)`, `UserID(x)`); `builtin` is a language function
-  (`len`, `append`); `blind` is a bare or package-qualified in-module function
-  the index does not hold; `dynamic` goes through a function value (parameter,
-  local, package variable or func-typed field); `ambiguous` is an interface
-  field with more than one implementation; `unknown` is a method chain whose
-  receiver type is not indexed (`config.DB.Exec`). Only `blind` is a real
-  in-module gap. The honest percentage is `resolved / (resolved + blind +
-  dynamic + ambiguous + unknown)`; external calls, conversions and builtins are
-  excluded because their targets are not in this module. Calls are counted per
-  function and deduplicated by expression; up to 20 blind expressions are
-  listed with file and line.
+  (`len`, `append`); `blind` is a bare or package-qualified in-module function,
+  or a method on a declared in-module value (parameter, result or package
+  variable), that the index does not hold; `dynamic` goes through a function
+  value (parameter, local, package variable or func-typed field); `ambiguous` is
+  an interface value with more than one indexed implementation; `unknown` is a
+  method chain whose receiver type is not declared (`tx := db.Begin();
+  tx.Exec()`) or a chain that continues past the declared value. Declared
+  parameter, result and package-variable types are indexed, so `c.JSON(...)`
+  with `c *gin.Context` is `external` and `config.DB.Exec` is `external`, not
+  blind. Only `blind` is a real in-module gap. The honest percentage is
+  `resolved / (resolved + blind + dynamic + ambiguous + unknown)`; external
+  calls, conversions and builtins are excluded because their targets are not in
+  this module. Calls are counted per function and deduplicated by expression;
+  up to 20 blind expressions are listed with file and line.
 - **flows** — flow expansion stops at depth 3 and at 1400 baked functions.
   Baked flows cut by the depth cap carry `trunc` in the JSON data, and the
   report counts every flow skipped at the cap.
