@@ -54,6 +54,40 @@ type FieldRef struct {
 	Text string
 }
 
+// Diag records what the loader could not read or resolve, so a report can name
+// the analyzer's blind spots instead of counting only what worked.
+type Diag struct {
+	Parsed     int              `json:"parsed"`
+	Skipped    int              `json:"skipped"`
+	Read       int              `json:"read,omitempty"`
+	Parse      int              `json:"parse,omitempty"`
+	Generated  int              `json:"generated,omitempty"`
+	Skip       []SkippedFile    `json:"skip,omitempty"`
+	Calls      int              `json:"calls"`
+	Resolved   int              `json:"resolved"`
+	Unresolved int              `json:"unresolved"`
+	Unres      []UnresolvedCall `json:"unres,omitempty"`
+	Truncated  int              `json:"truncated,omitempty"`
+}
+
+// SkippedFile is one source file the loader did not read into the module.
+type SkippedFile struct {
+	Path   string `json:"p"`
+	Reason string `json:"r"` // read | parse | generated
+}
+
+// UnresolvedCall is a call that pointed inside this module and still had no
+// target, with the function that contains it.
+type UnresolvedCall struct {
+	Func string `json:"fn"`
+	Expr string `json:"e"`
+	File string `json:"f,omitempty"`
+	Line int    `json:"l,omitempty"`
+}
+
+// diagLimit bounds the lists in Diag; the counters stay exact.
+const diagLimit = 20
+
 type Module struct {
 	Root    string
 	Path    string
@@ -66,6 +100,7 @@ type Module struct {
 	Fields  map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
 	Ifaces  map[string][]string            // "pkg|Interface" -> exported method names
 	PkgDocs map[string]string
+	Diag    Diag
 }
 
 var skipDirs = map[string]bool{
@@ -115,27 +150,32 @@ func loadModule(root string) (*Module, error) {
 	}
 
 	for _, p := range paths {
+		rel, _ := filepath.Rel(abs, p)
+		rel = filepath.ToSlash(rel)
 		src, err := os.ReadFile(p)
 		if err != nil {
+			m.skipFile(rel, "read")
 			continue
 		}
 		if strings.Contains(string(src[:min(len(src), 200)]), "Code generated") && len(src) > 400_000 {
+			m.skipFile(rel, "generated")
 			continue
 		}
 		af, err := parser.ParseFile(fset, p, src, parser.ParseComments)
 		if err != nil {
+			m.skipFile(rel, "parse")
 			continue
 		}
-		rel, _ := filepath.Rel(abs, p)
 		pkgPath := pkgPathFor(p, modPath, mods)
 		fc := &FileCtx{
 			Path:    p,
-			Rel:     filepath.ToSlash(rel),
+			Rel:     rel,
 			PkgPath: pkgPath,
 			Imports: map[string]string{},
 			Lines:   strings.Split(string(src), "\n"),
 			Ast:     af,
 		}
+		m.Diag.Parsed++
 		for _, imp := range af.Imports {
 			path, err := strconv.Unquote(imp.Path.Value)
 			if err != nil {
@@ -230,6 +270,23 @@ func loadModule(root string) (*Module, error) {
 	return m, nil
 }
 
+// skipFile records a source file the loader could not use. The counters stay
+// exact while the path list is bounded, so a broken tree cannot bloat the page.
+func (m *Module) skipFile(rel, reason string) {
+	m.Diag.Skipped++
+	switch reason {
+	case "read":
+		m.Diag.Read++
+	case "parse":
+		m.Diag.Parse++
+	case "generated":
+		m.Diag.Generated++
+	}
+	if len(m.Diag.Skip) < diagLimit {
+		m.Diag.Skip = append(m.Diag.Skip, SkippedFile{Path: rel, Reason: reason})
+	}
+}
+
 func (m *Module) callsOf(f *Func) []Call {
 	var out []Call
 	seen := map[string]bool{}
@@ -295,9 +352,47 @@ func (m *Module) callsOf(f *Func) []Call {
 			}
 		}
 		out = append(out, c)
+		m.Diag.Calls++
+		if c.Target != nil {
+			m.Diag.Resolved++
+			return true
+		}
+		if m.unresolvedCall(f, c) {
+			m.Diag.Unresolved++
+			if len(m.Diag.Unres) < diagLimit {
+				m.Diag.Unres = append(m.Diag.Unres, UnresolvedCall{
+					Func: fnName(f),
+					Expr: c.Expr,
+					File: f.File.Rel,
+					Line: c.Line,
+				})
+			}
+		}
 		return true
 	})
 	return out
+}
+
+// builtins are language functions, not calls this module could resolve.
+var builtins = map[string]bool{
+	"len": true, "cap": true, "append": true, "make": true, "new": true,
+	"copy": true, "delete": true, "panic": true, "recover": true,
+	"print": true, "println": true, "complex": true, "real": true,
+	"imag": true, "close": true, "clear": true, "min": true, "max": true,
+}
+
+// unresolvedCall reports whether a call should have resolved inside this
+// module but did not. Stdlib and framework calls are not blind spots: their
+// PkgPath is in no package of this module.
+func (m *Module) unresolvedCall(f *Func, c Call) bool {
+	if c.PkgPath != "" {
+		_, inModule := m.PKG[c.PkgPath]
+		return inModule
+	}
+	if c.Base != "" || c.Qual != "" {
+		return false
+	}
+	return !builtins[c.Sel] && m.PKG[f.PkgPath][c.Sel] == nil
 }
 
 // fieldCall reports whether the call hangs off a field of the receiver,

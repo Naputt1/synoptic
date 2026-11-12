@@ -55,7 +55,8 @@ type JFunc struct {
 	Steps []Step    `json:"flow,omitempty"`
 	In    []JInput  `json:"in,omitempty"`
 	Fx    []JEffect `json:"fx,omitempty"`
-	Rpc   string    `json:"rpc,omitempty"` // "si/mi" when this function implements a service method
+	Rpc   string    `json:"rpc,omitempty"`   // "si/mi" when this function implements a service method
+	Trunc bool      `json:"trunc,omitempty"` // baked flow stopped at the depth or flow cap
 }
 
 type JStats struct {
@@ -82,10 +83,12 @@ type JData struct {
 	Flows    map[string]JFunc        `json:"flows"`
 	Types    map[string]JType        `json:"types,omitempty"`
 	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
+	Diag     Diag                    `json:"diag"`
 }
 
 func buildData(m *Module, routes []*Route) JData {
 	d := JData{Repo: baseName(m.Root), Mod: m.Path, Flows: map[string]JFunc{}}
+	m.Diag.Truncated = 0
 	groups := map[string]bool{}
 	mw := map[string]bool{}
 
@@ -191,6 +194,7 @@ func buildData(m *Module, routes []*Route) JData {
 		d.Flows[key] = jf
 	}
 	d.Stats.Funcs = len(d.Flows)
+	d.Diag = m.Diag
 	return d
 }
 
@@ -233,7 +237,13 @@ func indexStreamEvents(m *Module, flows map[string]JFunc, routes []*Route) {
 
 // indexFunc bakes a function's flow and its callees, so every click is local.
 func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
-	if fn == nil || fn.Key == "" || len(flows) >= flowLimit {
+	if fn == nil || fn.Key == "" {
+		return
+	}
+	if len(flows) >= flowLimit {
+		if _, seen := flows[fn.Key]; !seen {
+			m.Diag.Truncated++
+		}
 		return
 	}
 	file := ""
@@ -243,7 +253,7 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 	if _, seen := flows[fn.Key]; seen {
 		return
 	}
-	flows[fn.Key] = JFunc{
+	jf := JFunc{
 		Name:  fnName(fn),
 		Pkg:   altPkg(fn.PkgPath),
 		File:  file,
@@ -254,6 +264,13 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 		In:    analyzeStageInputs(m, fn, ""),
 		Fx:    buildEffects(fn),
 	}
+	// At the depth cap a flow with callees is cut short; say so rather than
+	// ending the trail as if the function had nothing left to show.
+	if depth >= flowDepth && hasTarget(fn) {
+		jf.Trunc = true
+		m.Diag.Truncated++
+	}
+	flows[fn.Key] = jf
 	if depth >= flowDepth {
 		return
 	}
@@ -262,6 +279,16 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 			indexFunc(m, flows, c.Target, depth+1)
 		}
 	}
+}
+
+// hasTarget reports whether a function calls something this module resolved.
+func hasTarget(fn *Func) bool {
+	for _, c := range fn.Calls {
+		if c.Target != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func fnName(fn *Func) string {
@@ -497,5 +524,40 @@ func report(d JData, out string) {
 	}
 	fmt.Printf("  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
 	fmt.Printf("  flows baked                  %d functions\n", d.Stats.Funcs)
+	g := d.Diag
+	if g.Skipped > 0 {
+		fmt.Printf("  files      %d parsed, %d skipped", g.Parsed, g.Skipped)
+		var why []string
+		for _, r := range []struct {
+			n     int
+			label string
+		}{{g.Parse, "parse"}, {g.Read, "read"}, {g.Generated, "generated"}} {
+			if r.n > 0 {
+				why = append(why, fmt.Sprintf("%s %d", r.label, r.n))
+			}
+		}
+		if len(why) > 0 {
+			fmt.Printf(" (%s)", strings.Join(why, ", "))
+		}
+		fmt.Println()
+		for i, f := range g.Skip {
+			if i == 5 {
+				break
+			}
+			fmt.Printf("             - %s (%s)\n", f.Path, f.Reason)
+		}
+	}
+	if g.Unresolved > 0 {
+		fmt.Printf("  calls      %d/%d resolved (%d in-module unresolved)\n", g.Resolved, g.Calls, g.Unresolved)
+		for i, c := range g.Unres {
+			if i == 5 {
+				break
+			}
+			fmt.Printf("             - %s: %s (%s:%d)\n", c.Func, c.Expr, c.File, c.Line)
+		}
+	}
+	if g.Truncated > 0 {
+		fmt.Printf("  flows      %d truncated at depth/limit\n", g.Truncated)
+	}
 	fmt.Printf("  written to %s\n", out)
 }

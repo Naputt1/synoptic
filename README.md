@@ -63,6 +63,35 @@ A repo that holds several services — `jobs/`, `users/`, `projects/`, each with
 
 The page stays unsplit when the split would lie: a route registered outside every entry point's directory keeps one surface, and an entry point that owns no route or RPC (a queue worker, say) is not offered.
 
+## Coverage and blind spots
+
+The console report (`-html=false`, or any run) also counts what the analyzer
+could not see, and only prints that block when there is something to say:
+
+```
+  files      128 parsed, 1 skipped (parse 1)
+             - internal/broken.go (parse)
+  calls      940/952 resolved (12 in-module unresolved)
+             - Handler.Create: svc.Store (handler.go:42)
+  flows      3 truncated at depth/limit
+```
+
+- **files** — every `.go` file that failed to read or parse, or that was skipped
+  as generated, is listed with its reason. The page omits those files entirely,
+  so a route declared there is invisible.
+- **calls** — calls are counted per function and deduplicated by expression. A
+  call counts as *in-module unresolved* only when it should have resolved here:
+  a package path belongs to this module, or it is a bare identifier absent from
+  the file's package (Go builtins excluded). Stdlib and framework calls are not
+  blind spots. The top unresolved expressions are listed with file and line.
+- **flows** — flow expansion stops at depth 3 and at 1400 baked functions.
+  Baked flows cut by the depth cap carry `trunc` in the JSON data, and the
+  report counts every flow skipped at the cap.
+
+The same counters and bounded lists are in the baked JSON under `diag`
+(`parsed`, `skipped`, `read`, `parse`, `generated`, `skip`, `calls`,
+`resolved`, `unresolved`, `unres`, `truncated`).
+
 ## Limits
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).
