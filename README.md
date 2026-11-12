@@ -13,7 +13,7 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, and the repo must type-check), `-base <ref>` (mark routes and stages whose files changed since a git ref; best-effort, never fails the run), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (mark routes and stages whose files changed since a git ref; reads file names only, never analyzes the base tree, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
 
 The default analysis path uses only the Go standard library. `-typed` is the one
 third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
@@ -66,6 +66,23 @@ The runner shallow-fetches each public repo at its full commit SHA into
 `$HOME/git`); a missing local repo, or one with no Go routes, is logged and
 skipped, so a laptop checkout never needs the private set. CI measures the
 public repos only.
+
+`.github/workflows/corpus.yml` runs the pinned public set nightly at 03:17 UTC
+and on demand; local entries are measured only on a machine that has them. The
+table below is generated from `testdata/corpus/baseline.json` — the committed
+floor, not a wish list. `blind` is that file's `unresolved` (the honest gap),
+`unknown` its `unk`, and `external` its `ext`:
+
+| repo | framework | routes | services | parsed | skipped | flows | resolved | blind | unknown | external | truncated |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| chi-rest | chi | 12 | 0 | 1 | 0 | 25 | 20 | 0 | 30 | 41 | 0 |
+| echox | echo | 51 | 0 | 47 | 1 | 54 | 54 | 47 | 437 | 505 | 0 |
+| fiber-hexagonal | fiber | 5 | 0 | 8 | 0 | 5 | 10 | 6 | 31 | 48 | 0 |
+| gin-realworld | gin | 27 | 0 | 17 | 0 | 47 | 146 | 0 | 184 | 124 | 0 |
+| grpc-gateway | grpc | 4 | 9 | 295 | 1 | 82 | 2734 | 503 | 1843 | 7749 | 0 |
+| hapymed-api | — (local) | 130 | 0 | 133 | 0 | 199 | 1068 | 1 | 1208 | 1061 | 1 |
+| resm | — (local) | 89 | 0 | 124 | 0 | 139 | 141 | 0 | 260 | 998 | 2 |
+| weesvc-gorilla | gorilla/mux | 14 | 0 | 23 | 0 | 21 | 55 | 5 | 82 | 146 | 0 |
 
 **Adding a repo.** Add an entry with `name`, `url`, a full 40-character `ref`,
 the module directory in `root` (empty at the clone root), `minRoutes`, and
@@ -157,6 +174,14 @@ could not see, and only prints that block when there is something to say:
   flows      2 truncated at depth/limit
 ```
 
+Route coverage and call coverage are different questions. The tool is strong at
+finding routes: the corpus table above is the route surface it already renders.
+The honest percentage measures something narrower — how often a call's target is
+provable as an in-module function. External framework calls (`c.JSON`), type
+conversions and builtins are not blind spots; their targets are not in this
+module at all, so they are excluded from the denominator. A complete route map
+can sit near 35% without a single in-module gap, as Resm does.
+
 - **files** — every `.go` file that failed to read or parse, that was skipped
   as generated, or that is inactive for the current `GOOS`/`GOARCH` is listed
   with its reason. Inactive files (`//go:build` lines and filename suffixes
@@ -179,7 +204,8 @@ could not see, and only prints that block when there is something to say:
   `resolved / (resolved + blind + dynamic + ambiguous + unknown)`; external
   calls, conversions and builtins are excluded because their targets are not in
   this module. Calls are counted per function and deduplicated by expression;
-  up to 20 blind expressions are listed with file and line.
+  up to 20 blind expressions are listed with file and line. The `#/diag` page
+  shows the same eight reason names.
 - **flows** — flow expansion stops at depth 3 and at 1400 baked functions.
   Baked flows cut by the depth cap carry `trunc` in the JSON data, and the
   report counts every flow skipped at the cap.
@@ -260,10 +286,13 @@ heuristics cannot name:
 - receiver types named indirectly (aliases, promoted fields).
 
 It only fills calls that are still unresolved, so typed output is the AST output
-plus those targets; the default run is unchanged. The console prints
-`typed: N calls resolved`. A repo that does not type-check is not fatal: the
-pass reports `typed: M package errors: <first three>` and keeps whatever it
-could resolve, so the page still renders.
+plus those targets; the default run is unchanged. It never overrides a target the
+syntax pass already found. The console prints `typed: N calls resolved`. On Resm,
+`-typed` resolves 10 more calls (141 → 151) and raises the honest metric from
+35.2% to 37.7% (+2.5 points); the denominator stays 401 because those calls stop
+being `unknown`. A repo that does not type-check is not fatal: the pass reports
+`typed: M package errors: <first three>` and keeps whatever it could resolve, so
+the page still renders.
 
 What it still cannot see:
 
@@ -285,7 +314,7 @@ analysis path remains standard-library-only.
 ## Limits
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).
-- Flow depth stops at foreign packages. A call through an interface field resolves to its single concrete implementation (repository → store); an interface with several implementations stays unbound rather than guessed. Recursion stops at the breadcrumb trail.
+- Flow depth stops at foreign packages. A call through an interface field resolves to its single concrete implementation (repository → store); an interface with several implementations stays unbound rather than guessed. Static wiring evidence is not used yet: the wiring PR was closed by the phase gate, not because the approach is a bug. Recursion stops at the breadcrumb trail.
 - Stream schemas stop at dynamic values (`any`, channels, values crossing an interface). Socket.IO rooms are not treated as plain WebSockets.
 - The service switcher is directory-based. A repo that wires every route from one central router, outside the entry point directories, keeps a single surface rather than a wrong split.
 - Build constraints use this machine's `GOOS`/`GOARCH` defaults, including `//go:build` lines and filename suffixes such as `_windows.go`. Files that do not match are skipped and listed with reason `build`, so a cross-compiled surface is not shown.

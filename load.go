@@ -70,7 +70,7 @@ type FieldRef struct {
 }
 
 // Diag records what the loader could not read or resolve, so a report can name
-// the analyzer's blind spots instead of counting only what worked.
+// the analyzer's gaps instead of counting only what worked.
 type Diag struct {
 	Parsed     int              `json:"parsed"`
 	Skipped    int              `json:"skipped"`
