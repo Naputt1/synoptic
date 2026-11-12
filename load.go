@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 type FileCtx struct {
@@ -120,6 +121,7 @@ type Module struct {
 	Methods   map[string][]*Func             // method name -> every method with that name
 	Recv      map[string][]*Func             // "pkgPath|receiver type" -> methods
 	Fields    map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
+	Embeds    map[string][]FieldRef          // "pkg|Type" -> embedded types, in field order
 	Ifaces    map[string][]string            // "pkg|Interface" -> exported method names
 	Types     map[string]map[string]bool     // pkgPath -> every declared type name
 	FuncTypes map[string]bool                // "pkg|Type" -> declared func type
@@ -147,6 +149,7 @@ func loadModule(root string) (*Module, error) {
 		Methods:   map[string][]*Func{},
 		Recv:      map[string][]*Func{},
 		Fields:    map[string]map[string]FieldRef{},
+		Embeds:    map[string][]FieldRef{},
 		Ifaces:    map[string][]string{},
 		Types:     map[string]map[string]bool{},
 		FuncTypes: map[string]bool{},
@@ -232,16 +235,29 @@ func loadModule(root string) (*Module, error) {
 						continue
 					}
 					fields := map[string]FieldRef{}
+					var embeds []FieldRef
 					for _, fld := range st.Fields.List {
 						typ := typeString(fld.Type)
 						pkg, name := typeRef(fc, typ)
 						isFunc := m.isFuncType(fc, fld.Type)
+						if len(fld.Names) == 0 {
+							// An embedded field promotes its own methods (and, for
+							// an embedded interface, its method names). The field
+							// has no name of its own, so it is not a Fields entry.
+							if embed, ok := embedRef(pkg, name, typ); ok {
+								embeds = append(embeds, embed)
+							}
+							continue
+						}
 						for _, n := range fld.Names {
 							fields[n.Name] = FieldRef{Pkg: pkg, Name: name, Text: typ, Func: isFunc}
 						}
 					}
 					if len(fields) > 0 {
 						m.Fields[fc.PkgPath+"|"+ts.Name.Name] = fields
+					}
+					if len(embeds) > 0 {
+						m.Embeds[fc.PkgPath+"|"+ts.Name.Name] = embeds
 					}
 				}
 				continue
@@ -955,13 +971,115 @@ func fieldCall(qual, recvVar string) bool {
 	return rest != "" && !strings.Contains(rest, ".")
 }
 
-// methodOn finds sel on the declared field type. It returns nil for interface
-// types: their methods live on implementations, not on the type itself.
+// embedDepth bounds the walk over embedded types. Deep embedding is rare, and
+// the cap stops a pathological graph from turning a lookup into a full walk.
+const embedDepth = 8
+
+// methodOn finds sel on the declared type: declared directly, or promoted
+// through embedding. A direct method shadows an embedded one, and an ambiguous
+// promotion has no target. It returns nil for interface types: their methods
+// live on implementations, not on the type itself.
 func (m *Module) methodOn(pkgPath, name, sel string) *Func {
-	if name == "" {
+	fn, _, ambiguous := m.findMethod(pkgPath, name, sel)
+	if ambiguous {
 		return nil
 	}
-	return m.Funcs[fnKey(pkgPath, name, sel)]
+	return fn
+}
+
+// typeName keys one declared type for the breadth-first method-set walk.
+type typeName struct {
+	pkg  string
+	name string
+}
+
+// findMethod reports whether sel is in the method set of the named type. The
+// walk is breadth-first, so a shallower method shadows a deeper one. found is
+// true for an interface's own method but fn is nil then: no function backs it.
+// ambiguous is true when two different embedded types at the same depth both
+// provide sel; Go does not promote an ambiguous name, and neither does this
+// analyzer.
+func (m *Module) findMethod(pkgPath, name, sel string) (fn *Func, found, ambiguous bool) {
+	if name == "" || sel == "" {
+		return nil, false, false
+	}
+	if fn := m.Funcs[fnKey(pkgPath, name, sel)]; fn != nil {
+		return fn, true, false
+	}
+	if m.ifaceHas(pkgPath, name, sel) {
+		return nil, true, false
+	}
+	frontier := []typeName{{pkg: pkgPath, name: name}}
+	seen := map[typeName]bool{{pkg: pkgPath, name: name}: true}
+	for depth := 0; depth < embedDepth && len(frontier) > 0; depth++ {
+		var next []typeName
+		nextSet := map[typeName]bool{}
+		var hits []*Func
+		ifaceHits := 0
+		for _, tn := range frontier {
+			for _, ref := range m.Embeds[tn.pkg+"|"+tn.name] {
+				en := typeName{pkg: ref.Pkg, name: ref.Name}
+				if fn := m.Funcs[fnKey(en.pkg, en.name, sel)]; fn != nil {
+					hits = append(hits, fn)
+				} else if m.ifaceHas(en.pkg, en.name, sel) {
+					ifaceHits++
+				}
+				if !seen[en] && !nextSet[en] {
+					nextSet[en] = true
+					next = append(next, en)
+				}
+			}
+		}
+		switch n := len(hits) + ifaceHits; {
+		case n > 1:
+			return nil, true, true
+		case n == 1:
+			if len(hits) == 1 {
+				return hits[0], true, false
+			}
+			return nil, true, false
+		}
+		for _, tn := range next {
+			seen[tn] = true
+		}
+		frontier = next
+	}
+	return nil, false, false
+}
+
+// ifaceHas reports whether an interface declares sel. Only exported methods are
+// indexed, so an unexported one stays outside the walk.
+func (m *Module) ifaceHas(pkgPath, name, sel string) bool {
+	for _, n := range m.Ifaces[pkgPath+"|"+name] {
+		if n == sel {
+			return true
+		}
+	}
+	return false
+}
+
+// embedRef records an embedded field's type. It keeps only types the index can
+// name: a bare in-module type or an imported pkg.Type, with or without a
+// pointer. A literal or unresolvable type is skipped rather than guessed.
+func embedRef(pkg, name, text string) (FieldRef, bool) {
+	if pkg == "" || !plainTypeName(name) {
+		return FieldRef{}, false
+	}
+	return FieldRef{Pkg: pkg, Name: name, Text: text}, true
+}
+
+// plainTypeName reports whether name is one identifier and nothing else, so a
+// literal such as interface{} is not mistaken for an embeddable type.
+func plainTypeName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // typeRef resolves a type as written in a file to its package path and name,
@@ -980,23 +1098,28 @@ func typeRef(file *FileCtx, typeText string) (string, string) {
 	return file.PkgPath, t
 }
 
-// ifaceImpl finds the method sel on the one concrete type that declares every
+// ifaceImpl finds the method sel on the one concrete type that implements every
 // method of the interface: the receiver an interface call reaches when there is
-// exactly one, as with a repository interface and its store. Generated stubs
-// are skipped. More than one implementation is reported as ambiguous instead of
-// guessed, so the caller can say why the call has no target.
+// exactly one, as with a repository interface and its store. Methods may be
+// declared directly or promoted through embedding. Generated stubs are skipped.
+// More than one implementation is reported as ambiguous instead of guessed, so
+// the caller can say why the call has no target.
 func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) (*Func, bool) {
 	ms, ok := m.Ifaces[pkgPath+"|"+name]
 	if !ok {
 		return nil, false
 	}
 	var match *Func
-	for _, fn := range m.Methods[sel] {
-		if fn.Recv == "" || !m.declaresAll(fn.PkgPath, fn.Recv, ms) {
+	for _, tn := range m.candidateTypes() {
+		// the caller's own method is not an implementation of its field's interface
+		if self != nil && tn.pkg == self.PkgPath && tn.name == self.Recv {
 			continue
 		}
-		// the caller's own method is not an implementation of its field's interface
-		if self != nil && fn.PkgPath == self.PkgPath && fn.Recv == self.Recv {
+		fn, found, ambiguous := m.findMethod(tn.pkg, tn.name, sel)
+		if !found || ambiguous || fn == nil {
+			continue
+		}
+		if !m.declaresAll(tn.pkg, tn.name, ms) {
 			continue
 		}
 		if generatedOnly(m.recvMethods(fn.PkgPath, fn.Recv)) {
@@ -1010,10 +1133,44 @@ func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) (*Func, bool) 
 	return match, false
 }
 
-// declaresAll reports whether the type has a method for every name.
+// candidateTypes lists every type that could satisfy a non-empty interface: a
+// type with declared methods, or one that embeds another type. A type with
+// neither has no method set to check.
+func (m *Module) candidateTypes() []typeName {
+	seen := map[typeName]bool{}
+	var out []typeName
+	add := func(key string) {
+		pkg, name := splitRecvKey(key)
+		if pkg == "" || name == "" {
+			return
+		}
+		tn := typeName{pkg: pkg, name: name}
+		if seen[tn] {
+			return
+		}
+		seen[tn] = true
+		out = append(out, tn)
+	}
+	for key := range m.Recv {
+		add(key)
+	}
+	for key := range m.Embeds {
+		add(key)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].pkg != out[j].pkg {
+			return out[i].pkg < out[j].pkg
+		}
+		return out[i].name < out[j].name
+	})
+	return out
+}
+
+// declaresAll reports whether the type's method set contains every name,
+// directly or promoted through embedding. An ambiguous promotion does not count.
 func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
 	for _, n := range names {
-		if m.Funcs[fnKey(pkgPath, recv, n)] == nil {
+		if _, found, ambiguous := m.findMethod(pkgPath, recv, n); !found || ambiguous {
 			return false
 		}
 	}
