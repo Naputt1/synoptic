@@ -52,7 +52,10 @@ type Func struct {
 	Doc     string
 	Start   int
 	End     int
-	Calls   []Call
+	// Vars maps parameters and named results to their declared types. Calls on
+	// them can be resolved by declaration instead of guessed from assignments.
+	Vars  map[string]FieldRef
+	Calls []Call
 }
 
 // FieldRef is a struct field's declared type, already resolved through the
@@ -121,6 +124,7 @@ type Module struct {
 	Types     map[string]map[string]bool     // pkgPath -> every declared type name
 	FuncTypes map[string]bool                // "pkg|Type" -> declared func type
 	FuncVars  map[string]map[string]bool     // pkgPath -> package var of func type
+	Vars      map[string]FieldRef            // "pkgPath|name" -> declared package var/const type
 	PkgDocs   map[string]string
 	Diag      Diag
 }
@@ -147,6 +151,7 @@ func loadModule(root string) (*Module, error) {
 		Types:     map[string]map[string]bool{},
 		FuncTypes: map[string]bool{},
 		FuncVars:  map[string]map[string]bool{},
+		Vars:      map[string]FieldRef{},
 		PkgDocs:   map[string]string{},
 	}
 	modPath, modName := readGoMod(abs)
@@ -187,6 +192,9 @@ func loadModule(root string) (*Module, error) {
 	}
 
 	for _, fc := range m.Files {
+		if m.Types[fc.PkgPath] == nil {
+			m.Types[fc.PkgPath] = map[string]bool{}
+		}
 		for _, d := range fc.Ast.Decls {
 			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR {
 				m.indexFuncVars(fc, gd)
@@ -251,6 +259,10 @@ func loadModule(root string) (*Module, error) {
 				Decl:    fd,
 				Start:   line(fd.Pos()),
 				End:     line(fd.End()),
+				Vars:    m.fieldRefs(fc, fd.Type.Params),
+			}
+			for n, ref := range m.fieldRefs(fc, fd.Type.Results) {
+				f.Vars[n] = ref
 			}
 			if fd.Doc != nil {
 				f.Doc = cleanDoc(fd.Doc.Text())
@@ -266,6 +278,14 @@ func loadModule(root string) (*Module, error) {
 				m.Methods[f.Name] = append(m.Methods[f.Name], f)
 				k := recvKey(f.PkgPath, f.Recv)
 				m.Recv[k] = append(m.Recv[k], f)
+			}
+		}
+	}
+
+	for _, fc := range m.Files {
+		for _, d := range fc.Ast.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && (gd.Tok == token.VAR || gd.Tok == token.CONST) {
+				m.indexPackageVars(fc, gd)
 			}
 		}
 	}
@@ -446,6 +466,11 @@ func (m *Module) callsOf(f *Func) []Call {
 				}
 			}
 		}
+		// methods on values whose type is declared: parameters, named results and
+		// package variables. Assignments are deliberately not followed.
+		if c.Target == nil {
+			m.resolveDeclared(f, &c)
+		}
 		c.Why = m.why(f, c, dyn)
 		out = append(out, c)
 		return true
@@ -488,11 +513,20 @@ func (m *Module) why(f *Func, c Call, dyn map[string]bool) string {
 		return "dynamic"
 	}
 	if p, ok := f.File.Imports[c.Base]; ok {
-		if !m.hasPkg(p) {
-			return "external"
-		}
 		if c.Qual == c.Base {
+			if !m.inModule(p) {
+				return "external"
+			}
 			return "blind" // an in-module package function the index does not hold
+		}
+		// a package-qualified value: config.DB.Exec
+		if field := firstField(c.Qual, c.Base); field != "" {
+			if ref, ok := m.Vars[p+"|"+field]; ok {
+				return m.declReason(f, ref, c.Sel, c.Qual == c.Base+"."+field)
+			}
+		}
+		if !m.inModule(p) {
+			return "external"
 		}
 		return "unknown" // a method on a package-level value of unknown type
 	}
@@ -510,7 +544,104 @@ func (m *Module) why(f *Func, c Call, dyn map[string]bool) string {
 			}
 		}
 	}
+	// a value of a declared type: parameter, named result or package variable
+	if c.Qual == c.Base {
+		if ref, ok := m.declaredType(f, c.Base); ok {
+			return m.declReason(f, ref, c.Sel, true)
+		}
+	}
 	return "unknown"
+}
+
+// declaredType is the declared type of a value: a parameter or named result of
+// f first, then a package-level variable in its package.
+func (m *Module) declaredType(f *Func, name string) (FieldRef, bool) {
+	if ref, ok := f.Vars[name]; ok {
+		return ref, true
+	}
+	ref, ok := m.Vars[f.PkgPath+"|"+name]
+	return ref, ok
+}
+
+// declReason names why a call on a declared type did or did not resolve. An
+// in-module struct with no such method is blind: that is a real in-module gap,
+// not an alias or a conversion. An interface with several implementations is
+// ambiguous, and a type with no implementation indexed is unknown.
+func (m *Module) declReason(f *Func, ref FieldRef, sel string, direct bool) string {
+	if ref.Name == "" {
+		return "unknown"
+	}
+	if !m.inModule(ref.Pkg) {
+		return "external"
+	}
+	if !direct {
+		return "unknown" // the call is further down the chain than the declared value
+	}
+	if !m.Types[ref.Pkg][ref.Name] {
+		return "unknown" // a type parameter or a type the index does not hold
+	}
+	if m.methodOn(ref.Pkg, ref.Name, sel) != nil {
+		return "resolved"
+	}
+	if _, ok := m.Ifaces[ref.Pkg+"|"+ref.Name]; ok {
+		if _, ambiguous := m.ifaceImpl(ref.Pkg, ref.Name, sel, f); ambiguous {
+			return "ambiguous"
+		}
+		return "unknown"
+	}
+	return "blind"
+}
+
+// resolveDeclared fills a target from a declared receiver type. It handles both
+// s.GetUser() (a parameter or package variable) and config.DB.Exec (the first
+// selector of a package-qualified value). Anything assigned inside a function
+// stays unknown, so tx := db.Begin() is not guessed from the call on the right.
+func (m *Module) resolveDeclared(f *Func, c *Call) {
+	var ref FieldRef
+	var ok, direct bool
+	if c.Qual == c.Base {
+		if c.Base == "" {
+			return
+		}
+		if _, isImport := f.File.Imports[c.Base]; isImport {
+			return
+		}
+		ref, ok = m.declaredType(f, c.Base)
+		direct = true
+	} else if p, isImport := f.File.Imports[c.Base]; isImport {
+		field := firstField(c.Qual, c.Base)
+		if field == "" {
+			return
+		}
+		ref, ok = m.Vars[p+"|"+field]
+		direct = c.Qual == c.Base+"."+field
+	}
+	if !ok || !direct || ref.Name == "" || !m.inModule(ref.Pkg) {
+		return
+	}
+	if fn := m.methodOn(ref.Pkg, ref.Name, c.Sel); fn != nil {
+		c.Target = fn
+		c.PkgPath = fn.PkgPath
+		return
+	}
+	if fn, _ := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); fn != nil {
+		c.Target = fn
+		c.PkgPath = fn.PkgPath
+		c.Iface = ref.Text
+	}
+}
+
+// firstField returns the selector directly after base in a dotted expression:
+// DB for config.DB.Exec and for config.DB.Model().Where.
+func firstField(qual, base string) string {
+	rest := strings.TrimPrefix(qual, base+".")
+	if rest == qual {
+		return ""
+	}
+	if i := strings.IndexByte(rest, '.'); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
 }
 
 // isConvert reports whether the call is a type conversion: a basic type, or a
@@ -638,6 +769,131 @@ func (m *Module) isFuncType(file *FileCtx, e ast.Expr) bool {
 }
 
 func (m *Module) hasPkg(p string) bool { return m.PKG[p] != nil }
+
+// inModule reports whether a package has source in this module. Types is seeded
+// for every parsed package, so type-only packages are in-module too.
+func (m *Module) inModule(p string) bool { return m.Types[p] != nil }
+
+// fieldRefs resolves a parameter or result list through the file's imports,
+// exactly like struct fields.
+func (m *Module) fieldRefs(fc *FileCtx, fl *ast.FieldList) map[string]FieldRef {
+	out := map[string]FieldRef{}
+	if fl == nil {
+		return out
+	}
+	for _, fld := range fl.List {
+		ref := m.typeRefOf(fc, fld.Type)
+		if ref.Name == "" {
+			continue
+		}
+		for _, n := range fld.Names {
+			out[n.Name] = ref
+		}
+	}
+	return out
+}
+
+// indexPackageVars records package var/const types that can be read from the
+// declaration. Composite literals are read from their written type; a single
+// in-module constructor is followed through its result type. Everything else is
+// left out rather than guessed.
+func (m *Module) indexPackageVars(fc *FileCtx, gd *ast.GenDecl) {
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		ref := FieldRef{}
+		if vs.Type != nil {
+			ref = m.typeRefOf(fc, vs.Type)
+		} else {
+			ref, _ = m.valueRef(fc, vs)
+		}
+		if ref.Name == "" {
+			continue
+		}
+		for _, n := range vs.Names {
+			m.Vars[fc.PkgPath+"|"+n.Name] = ref
+		}
+	}
+}
+
+// valueRef reads a value's type from a composite literal or an in-module
+// constructor's single result. A call into another package is not followed.
+func (m *Module) valueRef(fc *FileCtx, vs *ast.ValueSpec) (FieldRef, bool) {
+	if len(vs.Values) != 1 {
+		return FieldRef{}, false
+	}
+	switch v := vs.Values[0].(type) {
+	case *ast.CompositeLit:
+		if v.Type == nil {
+			return FieldRef{}, false
+		}
+		return m.typeRefOf(fc, v.Type), true
+	case *ast.UnaryExpr:
+		if v.Op != token.AND {
+			return FieldRef{}, false
+		}
+		if cl, ok := v.X.(*ast.CompositeLit); ok && cl.Type != nil {
+			return m.typeRefOf(fc, cl.Type), true
+		}
+	case *ast.CallExpr:
+		if len(vs.Names) != 1 {
+			return FieldRef{}, false // one value cannot type several names
+		}
+		id, ok := unindex(v.Fun).(*ast.Ident)
+		if !ok {
+			return FieldRef{}, false
+		}
+		fn := m.PKG[fc.PkgPath][id.Name]
+		if fn == nil || fn.Decl == nil || fn.Decl.Type == nil || fn.Decl.Type.Results == nil {
+			return FieldRef{}, false
+		}
+		if len(fn.Decl.Type.Results.List) != 1 {
+			return FieldRef{}, false
+		}
+		ref := m.typeRefOf(fn.File, fn.Decl.Type.Results.List[0].Type)
+		return ref, ref.Name != ""
+	}
+	return FieldRef{}, false
+}
+
+// externalPkg marks a type whose qualifier is not a known import alias. The
+// written type still names a package, so it is outside this module even when we
+// cannot recover its import path (an unaliased package whose name differs from
+// the last path element, such as valkey-go imported as valkey).
+const externalPkg = "\x00external"
+
+// typeRefOf turns a written type into the FieldRef used by fields, parameters
+// and package variables.
+func (m *Module) typeRefOf(fc *FileCtx, e ast.Expr) FieldRef {
+	if e == nil {
+		return FieldRef{}
+	}
+	text := typeString(e)
+	pkg, name := typeRef(fc, text)
+	if alias, ok := typeAlias(text); ok {
+		if _, imported := fc.Imports[alias]; !imported {
+			pkg = externalPkg
+		}
+	}
+	return FieldRef{Pkg: pkg, Name: name, Text: text, Func: m.isFuncType(fc, e)}
+}
+
+// typeAlias returns the qualifier of a written type: gorm in *gorm.DB and
+// valkey in valkey.Client.
+func typeAlias(text string) (string, bool) {
+	t := strings.TrimPrefix(text, "*")
+	i := strings.LastIndex(t, ".")
+	if i < 0 {
+		return "", false
+	}
+	alias := t[:i]
+	if j := strings.LastIndexAny(alias, "[]*"); j >= 0 {
+		alias = alias[j+1:]
+	}
+	return alias, alias != ""
+}
 
 // recount rebuilds the call diagnostics from the per-call reasons. It runs at
 // the end of loading and again after typed resolution, so -typed moves the
