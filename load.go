@@ -32,6 +32,9 @@ type Call struct {
 	Line    int
 	PkgPath string
 	Target  *Func
+	// Pos is the call site in the loader's file set. It is not serialized; the
+	// typed pass uses it to match this call to the type checker's own syntax.
+	Pos token.Pos `json:"-"`
 }
 
 type Func struct {
@@ -364,6 +367,7 @@ func (m *Module) callsOf(f *Func) []Call {
 		}
 		seen[key] = true
 		c.Line = line(ce.Pos())
+		c.Pos = ce.Pos()
 		if c.Base == "" {
 			if fn := m.PKG[f.PkgPath][c.Sel]; fn != nil {
 				c.Target = fn

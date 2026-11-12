@@ -13,7 +13,10 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, and the repo must type-check), `-version` (print `synoptic <version>` and exit).
+
+The default analysis path uses only the Go standard library. `-typed` is the one
+third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
 
 ## Checks
 
@@ -76,6 +79,7 @@ Comments are the docs: a stage shows its Go doc comment, or `@Summary`/`@Descrip
 ## How it reads the code
 
 - `load.go` parses the module (AST, imports, doc comments) and indexes every func with its calls. Nested `go.mod` files are respected, so a microservice workspace with one module per service resolves across them.
+- `typed.go` is optional (`-typed`): it type-checks the module with `golang.org/x/tools/go/packages` and fills call targets the syntax pass could not name.
 - `routes.go` walks the route registration: `gin`, `fiber`, `chi`, `gorilla/mux`, `net/http`, `echo`, including groups registered in other functions, middleware added with `Use`, handler factories called inline (`app.Get("/x", Activities(*u))`), factories stored in a variable, and `.PathPrefix(...).Subrouter()` / `.Methods(...)`.
 - `flow.go` turns a function body into steps: calls, exits (an `if` whose body only returns), loops, switches, repeated calls folded to `×n`.
 - `grpc.go` reads `Register<Service>Server` calls and the generated `_ServiceDesc`, then resolves the implementation and its interceptor chain for the RPC tab.
@@ -121,6 +125,43 @@ The same counters and bounded lists are in the baked JSON under `diag`
 (`parsed`, `skipped`, `read`, `parse`, `generated`, `build`, `skip`, `calls`,
 `resolved`, `unresolved`, `unres`, `truncated`).
 
+## Typed mode (`-typed`)
+
+The default loader is syntax-only: it reads the AST, imports and doc comments,
+and never runs the type checker. `-typed` adds an optional pass that runs
+`golang.org/x/tools/go/packages` over `-root` and fills call targets the syntax
+heuristics cannot name:
+
+- methods promoted from an embedded type — `api.Ping()` where `Ping` is declared
+  on the embedded `Base`;
+- package calls whose package name differs from its directory name, and calls
+  through aliases or generic instantiations;
+- package-level functions and variables whose type the checker infers;
+- receiver types named indirectly (aliases, promoted fields).
+
+It only fills calls that are still unresolved, so typed output is the AST output
+plus those targets; the default run is unchanged. The console prints
+`typed: N calls resolved`. A repo that does not type-check is not fatal: the
+pass reports `typed: M package errors: <first three>` and keeps whatever it
+could resolve, so the page still renders.
+
+What it still cannot see:
+
+- **interface dispatch stays static.** A call on an interface value resolves to
+  the interface method, not an implementation; the existing
+  single-implementation fallback still applies. Typed mode does not claim to
+  resolve implementations.
+- code behind another `GOOS`/`GOARCH`, files the loader skipped, and modules
+  outside `-root`.
+- dynamic behavior: reflection, function values passed as data, and routes built
+  at runtime.
+
+Cost and dependency: typed mode type-checks the repo, so it is slower and the
+repo must resolve its own imports. The pass sets `GOWORK=off`, so a parent
+workspace does not pull in packages outside the checkout. `golang.org/x/tools`
+is the project's only Go dependency; only this mode calls it, and the default
+analysis path remains standard-library-only.
+
 ## Limits
 
 - Paths must be string literals; anything built at runtime is skipped rather than guessed (the tool exits 2 instead of writing an empty page).
@@ -128,6 +169,7 @@ The same counters and bounded lists are in the baked JSON under `diag`
 - Stream schemas stop at dynamic values (`any`, channels, values crossing an interface). Socket.IO rooms are not treated as plain WebSockets.
 - The service switcher is directory-based. A repo that wires every route from one central router, outside the entry point directories, keeps a single surface rather than a wrong split.
 - Build constraints use this machine's `GOOS`/`GOARCH` defaults, including `//go:build` lines and filename suffixes such as `_windows.go`. Files that do not match are skipped and listed with reason `build`, so a cross-compiled surface is not shown.
+- `-typed` is opt-in and best-effort: it can be slow on large repos, reports the first type errors without failing the run, and never changes a target the syntax pass already found.
 - gRPC needs the generated `_grpc.pb.go` registration and `_ServiceDesc` inside `-root`. The implementation is found even when its factory returns the service interface. Modules referenced by `go.work` from outside `-root`, gRPC-gateway, and Connect-Go registrations are not resolved yet.
 
 ## Timing overlay (`-trace`)
