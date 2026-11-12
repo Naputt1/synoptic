@@ -34,15 +34,34 @@ type JRoute struct {
 	St    *JStream `json:"st,omitempty"`
 	Chain []JStage `json:"ch"`
 	Doc   *JDoc    `json:"doc,omitempty"`
+	New   bool     `json:"new,omitempty"`
 	Chg   bool     `json:"chg,omitempty"`
 }
 
+// JRouteKey names a route in the diff without its chain.
+type JRouteKey struct {
+	M   string `json:"m"`
+	P   string `json:"p"`
+	Svc string `json:"svc"`
+}
+
+// JRouteMod is a route that kept its identity but changed inside.
+type JRouteMod struct {
+	M   string   `json:"m"`
+	P   string   `json:"p"`
+	Svc string   `json:"svc"`
+	Why []string `json:"why"`
+}
+
 // JChange describes the -base view: the ref compared against, how many files it
-// touched, and how many routes have at least one changed file.
+// touched, and how the route set itself differs (added, removed, modified).
 type JChange struct {
-	Ref    string `json:"ref"`
-	Files  int    `json:"files"`
-	Routes int    `json:"routes"`
+	Ref      string      `json:"ref"`
+	Files    int         `json:"files"`
+	Routes   int         `json:"routes"`
+	Added    []JRouteKey `json:"added,omitempty"`
+	Removed  []JRouteKey `json:"removed,omitempty"`
+	Modified []JRouteMod `json:"modified,omitempty"`
 }
 
 // JSvc is one entry point of a multi-service module, with what it owns.
@@ -577,6 +596,10 @@ func report(d JData, htmlPath, jsonPath string) {
 	}
 	if g.Truncated > 0 {
 		fmt.Printf("  flows      %d truncated at depth/limit\n", g.Truncated)
+	}
+	if c := d.Change; c != nil {
+		fmt.Printf("  base %s: %d added, %d removed, %d changed (%d files touched)\n",
+			c.Ref, len(c.Added), len(c.Removed), c.Routes, c.Files)
 	}
 	if htmlPath != "" {
 		fmt.Printf("  written to %s\n", htmlPath)
