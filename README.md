@@ -13,7 +13,7 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (mark routes and stages whose files changed since a git ref; reads file names only, never analyzes the base tree, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (analyze the tree at a git ref and diff its routes against the working tree: added, removed and modified, plus file-touch marks; the base is read-only and AST-only, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
 
 The default analysis path uses only the Go standard library. `-typed` is the one
 third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
@@ -231,30 +231,56 @@ data:
 - **flows** — the truncated count and a link to every baked flow whose expansion
   stopped at the depth or flow cap.
 
-## Change view (`-base`)
+## Route diff (`-base`)
 
-`-base main` marks the routes and stages whose file changed since `main`:
+`-base main` analyzes the tree at `main` and diffs its routes against the working
+tree:
 
 ```bash
 go run . -root . -base main -out synoptic.html
 ```
 
-The committed part is `git diff --name-only <ref>...HEAD -- '*.go'`, a merge-base
-diff, so a base branch that moved after the fork does not light up every file it
-touched. Uncommitted edits are included too, which is what makes `-base HEAD`
-describe the working tree. Paths stay root-relative.
+The base tree is materialized with `git worktree add --detach` in a temp
+directory and analyzed with the same loader and route builders as the working
+tree (services, streams and docs included, AST only — `-typed` never runs there).
+If `-root` is a subdirectory of the repo, the analysis points at the matching
+subdirectory of the worktree. Routes match on `method + path + service`:
 
-**Semantics: a badge means "touches a file changed since `<ref>`", not "is a new
-route".** A route is marked when its registration file or any stage file
-changed; a stage is marked when its own file changed. The base tree is never
-analyzed — only file names are read, so routes and flows always describe the
-current tree. The router, route and step views show a `changed` badge, and the
-JSON carries `change: {ref, files, routes}` plus `chg` on each marked route and
-stage.
+- **added** — present now, absent at `<ref>`: marked `new` and `chg`.
+- **removed** — present at `<ref>`, absent now: listed under `removed`.
+- **modified** — same identity, different internals: `why` names `handler`,
+  `middleware` or `stream`. Working-tree stages that differ from the base chain
+  at the same position get `chg`.
 
-The feature is best-effort: a missing git, an unknown ref, or a 10-second
-timeout prints a warning and leaves the page without change data. It never fails
-the run.
+`change` carries the counts and the three lists:
+
+```json
+"change": {
+  "ref": "origin/main",
+  "files": 3,
+  "routes": 2,
+  "added": [{"m": "GET", "p": "/new", "svc": ""}],
+  "removed": [{"m": "POST", "p": "/old", "svc": ""}],
+  "modified": [{"m": "GET", "p": "/x", "svc": "", "why": ["middleware", "handler"]}]
+}
+```
+
+`routes` is the number of working-tree routes that are new or modified; `chg`
+stays the general badge. File-touch marks are kept alongside the diff: a route
+or stage whose file changed since `<ref>` still gets `chg` even when the route
+itself is unchanged. The file-touch part is a merge-base
+`git diff --name-only <ref>...HEAD -- '*.go'`, so a base branch that moved after
+the fork does not light up every file it touched; uncommitted edits count, which
+is what makes `-base HEAD` describe the working tree.
+
+The router view summarizes the diff (`vs <ref>: N added · N removed · N changed`)
+and lists removed routes and modified reasons under **what changed**. Removed
+routes have no working-tree box, so that list is the only place they appear.
+
+The feature is best-effort: missing git, an unknown ref, no `go.mod` at the base,
+or a timeout prints a warning and keeps the file-touch view. It never fails the
+run. The temp worktree is removed with `git worktree remove --force`, with
+`os.RemoveAll` as a fallback.
 
 ## Source redaction (`-no-source`)
 
