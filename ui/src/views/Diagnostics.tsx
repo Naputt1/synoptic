@@ -71,12 +71,17 @@ export function DiagnosticsView() {
     ] as const
   ).filter((r) => r.n > 0)
 
+  const change = data.change
+  const changeMeta = change
+    ? ` · vs ${change.ref}: ${change.added?.length ?? 0} added · ${change.removed?.length ?? 0} removed · ${change.modified?.length ?? 0} changed`
+    : ''
+
   return (
     <div className="flex h-full flex-col overflow-auto">
       <ScopeCard
         title="diagnostics"
         badge="diag"
-        meta={`${diag.parsed} files parsed · ${diag.skipped} skipped · ${diag.resolved}/${diag.calls} calls resolved · ${honestPct.toFixed(1)}% honest · ${diag.truncated ?? 0} flows truncated`}
+        meta={`${diag.parsed} files parsed · ${diag.skipped} skipped · ${diag.resolved}/${diag.calls} calls resolved · ${honestPct.toFixed(1)}% honest · ${diag.truncated ?? 0} flows truncated${changeMeta}`}
         note={`${diag.unresolved} blind ${diag.unresolved === 1 ? 'call' : 'calls'} — in-module targets the index should hold. External calls, conversions and builtins are not blind spots; unknown means the receiver type is not provable, so no target can be named.`}
       />
       <div className="grid gap-3 p-4 lg:grid-cols-2">
