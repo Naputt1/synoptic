@@ -8,6 +8,9 @@
 # generated data
 ui/public/synoptic.json
 
+# corpus clones (testdata/corpus.json; testdata/corpus/baseline.json is committed)
+/.corpus/
+
 # ui
 ui/node_modules/
 ui/dist/

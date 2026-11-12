@@ -1,0 +1,72 @@
+{
+  "repos": [
+    {
+      "name": "gin-realworld",
+      "url": "https://github.com/gothinkster/golang-gin-realworld-example-app",
+      "ref": "a41289b2a4951e7cc09066f86742a27f85121c9b",
+      "root": "",
+      "minRoutes": 5,
+      "framework": "gin"
+    },
+    {
+      "name": "fiber-hexagonal",
+      "url": "https://github.com/gofiber/recipes",
+      "ref": "6374a75dbdba9a5aeeff33fb853cddd5d35698fe",
+      "root": "hexagonal",
+      "minRoutes": 5,
+      "framework": "fiber"
+    },
+    {
+      "name": "chi-rest",
+      "url": "https://github.com/go-chi/chi",
+      "ref": "c64ed7d6635f33a8b2feaff7dcfa55677023ac7d",
+      "root": "_examples/rest",
+      "minRoutes": 5,
+      "framework": "chi"
+    },
+    {
+      "name": "echox",
+      "url": "https://github.com/labstack/echox",
+      "ref": "a77b1e803e5f0c509e62b2a023708467a1368593",
+      "root": "",
+      "minRoutes": 5,
+      "framework": "echo"
+    },
+    {
+      "name": "weesvc-gorilla",
+      "url": "https://github.com/weesvc/weesvc-gorilla",
+      "ref": "eb0f86736853970784897a48e88851c2282b08bc",
+      "root": "",
+      "minRoutes": 5,
+      "framework": "gorilla/mux"
+    },
+    {
+      "name": "grpc-gateway",
+      "url": "https://github.com/grpc-ecosystem/grpc-gateway",
+      "ref": "6b57c41cdfc337bfb9f1a46a66145810bb0378ad",
+      "root": "examples",
+      "minRoutes": 4,
+      "framework": "grpc"
+    },
+    {
+      "name": "resm",
+      "local": "Resm",
+      "minRoutes": 80
+    },
+    {
+      "name": "hapymed-api",
+      "local": "hapymed-api",
+      "minRoutes": 100
+    },
+    {
+      "name": "go-shopee-v2",
+      "local": "go-shopee-v2",
+      "minRoutes": 0
+    },
+    {
+      "name": "export-report-process",
+      "local": "export-report-process",
+      "minRoutes": 0
+    }
+  ]
+}

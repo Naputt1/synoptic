@@ -45,6 +45,50 @@ Go 1.26. `go.floor` records the supported floor (`1.26`) and
 so a future bump is a reviewed change instead of a silent Renovate side effect.
 CI runs the same check.
 
+## Corpus
+
+The corpus is a pinned set of real repositories the analyzer is measured
+against. `testdata/corpus.json` lists them, and `testdata/corpus/baseline.json`
+is the committed floor. The runner lives behind the `corpus` build tag, so
+`go test ./...` stays offline and the nightly workflow is the only automatic
+run:
+
+```bash
+# Build the UI first: the harness builds the analyzer, which embeds ui/dist.
+make ui
+make corpus
+```
+
+The runner shallow-fetches each public repo at its full commit SHA into
+`.corpus/<name>` (gitignored), reuses a valid clone, and runs the analyzer with
+`-html=false`. It prints one table row per repo and writes the same table to
+`.corpus/report.txt`. Local repos are read from `SYN_CORPUS_LOCAL` (default
+`$HOME/git`); a missing local repo, or one with no Go routes, is logged and
+skipped, so a laptop checkout never needs the private set. CI measures the
+public repos only.
+
+**Adding a repo.** Add an entry with `name`, `url`, a full 40-character `ref`,
+the module directory in `root` (empty at the clone root), `minRoutes`, and
+`framework`. Run `make corpus`: a repo with no baseline entry is reported as a
+failure rather than silently accepted. Check that the measured numbers make
+sense, then record them deliberately:
+
+```bash
+UPDATE_CORPUS=1 go test -tags corpus -run '^TestCorpus$' -v .
+git diff testdata/corpus/baseline.json   # review the new floor
+```
+
+**Updating the baseline.** Never hand-edit it. After an intentional analyzer
+change, run the command above and commit the baseline with the code change.
+A new repo has no baseline until that run.
+
+**Regressions.** A route or service count below the baseline fails, as do more
+skipped files or more blind (`unresolved`) calls. Resolution may fall at most
+5% before it fails. More routes or flows is fine. The failure output names the
+repo and the exact baseline-to-current numbers. A gRPC-gateway repo counts its
+gateway routes in `routes` and its services separately; `minRoutes` is 4 for
+that entry because generated gateway registration exposes four literal paths.
+
 ## Performance
 
 The loader reads and parses `.go` files concurrently, and methods are indexed by

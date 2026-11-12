@@ -1,0 +1,108 @@
+{
+  "repos": {
+    "chi-rest": {
+      "routes": 12,
+      "services": 0,
+      "parsed": 1,
+      "skipped": 0,
+      "flows": 25,
+      "resolved": 20,
+      "unresolved": 0,
+      "unk": 30,
+      "ext": 41,
+      "trunc": 0,
+      "framework": "chi"
+    },
+    "echox": {
+      "routes": 51,
+      "services": 0,
+      "parsed": 47,
+      "skipped": 1,
+      "flows": 54,
+      "resolved": 54,
+      "unresolved": 47,
+      "unk": 437,
+      "ext": 505,
+      "trunc": 0,
+      "framework": "echo"
+    },
+    "fiber-hexagonal": {
+      "routes": 5,
+      "services": 0,
+      "parsed": 8,
+      "skipped": 0,
+      "flows": 5,
+      "resolved": 10,
+      "unresolved": 6,
+      "unk": 31,
+      "ext": 48,
+      "trunc": 0,
+      "framework": "fiber"
+    },
+    "gin-realworld": {
+      "routes": 27,
+      "services": 0,
+      "parsed": 17,
+      "skipped": 0,
+      "flows": 47,
+      "resolved": 146,
+      "unresolved": 0,
+      "unk": 184,
+      "ext": 124,
+      "trunc": 0,
+      "framework": "gin"
+    },
+    "grpc-gateway": {
+      "routes": 4,
+      "services": 9,
+      "parsed": 295,
+      "skipped": 1,
+      "flows": 82,
+      "resolved": 2734,
+      "unresolved": 503,
+      "unk": 1843,
+      "ext": 7749,
+      "trunc": 0,
+      "framework": "grpc"
+    },
+    "hapymed-api": {
+      "routes": 130,
+      "services": 0,
+      "parsed": 133,
+      "skipped": 0,
+      "flows": 199,
+      "resolved": 1068,
+      "unresolved": 1,
+      "unk": 1208,
+      "ext": 1061,
+      "trunc": 1,
+      "local": true
+    },
+    "resm": {
+      "routes": 89,
+      "services": 0,
+      "parsed": 124,
+      "skipped": 0,
+      "flows": 139,
+      "resolved": 141,
+      "unresolved": 0,
+      "unk": 260,
+      "ext": 998,
+      "trunc": 2,
+      "local": true
+    },
+    "weesvc-gorilla": {
+      "routes": 14,
+      "services": 0,
+      "parsed": 23,
+      "skipped": 0,
+      "flows": 21,
+      "resolved": 55,
+      "unresolved": 5,
+      "unk": 82,
+      "ext": 146,
+      "trunc": 0,
+      "framework": "gorilla/mux"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-.PHONY: ui build test check run floor
+.PHONY: ui build test check run floor corpus
 
 # The Go binary embeds ui/dist/index.html, so every Go target needs the UI built.
 ui:
@@ -17,6 +17,9 @@ check: ui
 
 floor:
 	scripts/check-floor.sh
+
+corpus:
+	go test -tags corpus -run TestCorpus -v .
 
 run: ui
 	go run . -root .
