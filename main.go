@@ -21,6 +21,7 @@ func main() {
 	js := flag.String("json", "", "also write the raw data as json (for the dev UI)")
 	html := flag.Bool("html", true, "write the html page")
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
+	typed := flag.Bool("typed", false, "use the Go type checker to resolve calls the AST pass misses (slower; the repo must type-check)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -33,6 +34,15 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "read:", err)
 		os.Exit(1)
+	}
+	if *typed {
+		n, terr := resolveTypedCalls(m, *root)
+		fmt.Fprintf(os.Stderr, "typed: %d calls resolved\n", n)
+		if terr != nil {
+			// Type-checking is a best-effort enhancement: a broken dependency or
+			// an offline module cache must not take the page down.
+			fmt.Fprintf(os.Stderr, "typed: %v\n", terr)
+		}
 	}
 	routes := buildRoutes(m)
 	services := buildServices(m)
