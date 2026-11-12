@@ -37,6 +37,8 @@ jobs:
           fi
       - name: Build
         run: go build ./...
+      - name: Check Go floor
+        run: ./scripts/check-floor.sh
       - name: Vet and test
         run: |
           pkgs=$(go list ./... | grep -v '/node_modules/')

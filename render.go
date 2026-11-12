@@ -559,8 +559,15 @@ func report(d JData, out string) {
 			fmt.Printf("             - %s (%s)\n", f.Path, f.Reason)
 		}
 	}
-	if g.Unresolved > 0 {
-		fmt.Printf("  calls      %d/%d resolved (%d in-module unresolved)\n", g.Resolved, g.Calls, g.Unresolved)
+	if g.Calls > 0 {
+		honest := g.Resolved + g.Unresolved + g.Dynamic + g.Ambiguous + g.Unknown
+		pct := 0.0
+		if honest > 0 {
+			pct = float64(g.Resolved) / float64(honest) * 100
+		}
+		fmt.Printf("  calls      %d total: %d resolved, %d external, %d convert, %d builtin, %d blind, %d dynamic, %d ambiguous, %d unknown\n",
+			g.Calls, g.Resolved, g.External, g.Convert, g.Why["builtin"], g.Unresolved, g.Dynamic, g.Ambiguous, g.Unknown)
+		fmt.Printf("             honest %d/%d = %.1f%% (external, convert and builtin are not blind spots)\n", g.Resolved, honest, pct)
 		for i, c := range g.Unres {
 			if i == 5 {
 				break

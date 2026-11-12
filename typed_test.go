@@ -218,3 +218,36 @@ func flowHasKey(steps []Step, key string) bool {
 	}
 	return false
 }
+
+// Typed resolution adds targets after the AST pass, so the metric is rebuilt
+// from the calls instead of keeping the pre-typed count.
+func TestTypedResolutionMovesTheMetric(t *testing.T) {
+	dir := writeTypedFixture(t)
+	m, err := loadModule(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := m.Diag
+	handler := m.Funcs["svc/app|Handler"]
+	c := findCall(t, handler, "api.Ping")
+	if c.Why != "unknown" {
+		t.Fatalf("api.Ping why = %q, want unknown before typed", c.Why)
+	}
+
+	n, err := resolveTypedCalls(m, dir)
+	if err != nil {
+		t.Fatalf("resolveTypedCalls: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("typed mode resolved no calls")
+	}
+	if got := m.Diag.Resolved; got != before.Resolved+n {
+		t.Fatalf("resolved = %d, want %d after %d typed resolutions", got, before.Resolved+n, n)
+	}
+	if got := m.Diag.Why["resolved"]; got != before.Why["resolved"]+n {
+		t.Fatalf("why[resolved] = %d, want %d", got, before.Why["resolved"]+n)
+	}
+	if c.Why != "resolved" {
+		t.Fatalf("api.Ping why = %q, want resolved after typed", c.Why)
+	}
+}

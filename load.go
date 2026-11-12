@@ -32,6 +32,10 @@ type Call struct {
 	Line    int
 	PkgPath string
 	Target  *Func
+	// Why is the one reason this call did or did not resolve: resolved,
+	// external, builtin, convert, blind, dynamic, ambiguous or unknown. It is
+	// not serialized: the diag block is the public, aggregated form.
+	Why string `json:"-"`
 	// Pos is the call site in the loader's file set. It is not serialized; the
 	// typed pass uses it to match this call to the type checker's own syntax.
 	Pos token.Pos `json:"-"`
@@ -48,7 +52,10 @@ type Func struct {
 	Doc     string
 	Start   int
 	End     int
-	Calls   []Call
+	// Vars maps parameters and named results to their declared types. Calls on
+	// them can be resolved by declaration instead of guessed from assignments.
+	Vars  map[string]FieldRef
+	Calls []Call
 }
 
 // FieldRef is a struct field's declared type, already resolved through the
@@ -58,6 +65,7 @@ type FieldRef struct {
 	Pkg  string
 	Name string
 	Text string
+	Func bool // the field's type is a function value, not a callable type
 }
 
 // Diag records what the loader could not read or resolve, so a report can name
@@ -72,7 +80,13 @@ type Diag struct {
 	Skip       []SkippedFile    `json:"skip,omitempty"`
 	Calls      int              `json:"calls"`
 	Resolved   int              `json:"resolved"`
-	Unresolved int              `json:"unresolved"`
+	Unresolved int              `json:"unresolved"` // blind only: the real gap
+	External   int              `json:"ext,omitempty"`
+	Convert    int              `json:"conv,omitempty"`
+	Dynamic    int              `json:"dyn,omitempty"`
+	Ambiguous  int              `json:"amb,omitempty"`
+	Unknown    int              `json:"unk,omitempty"`
+	Why        map[string]int   `json:"why,omitempty"`
 	Unres      []UnresolvedCall `json:"unres,omitempty"`
 	Truncated  int              `json:"truncated,omitempty"`
 }
@@ -83,31 +97,36 @@ type SkippedFile struct {
 	Reason string `json:"r"` // read | parse | generated | build
 }
 
-// UnresolvedCall is a call that pointed inside this module and still had no
-// target, with the function that contains it.
+// UnresolvedCall is a blind call: it pointed at an in-module function that the
+// index does not contain, with the function that contains it.
 type UnresolvedCall struct {
-	Func string `json:"fn"`
-	Expr string `json:"e"`
-	File string `json:"f,omitempty"`
-	Line int    `json:"l,omitempty"`
+	Func   string `json:"fn"`
+	Expr   string `json:"e"`
+	File   string `json:"f,omitempty"`
+	Line   int    `json:"l,omitempty"`
+	Reason string `json:"r,omitempty"`
 }
 
 // diagLimit bounds the lists in Diag; the counters stay exact.
 const diagLimit = 20
 
 type Module struct {
-	Root    string
-	Path    string
-	Name    string
-	Files   []*FileCtx
-	Funcs   map[string]*Func
-	PKG     map[string]map[string]*Func    // pkgPath -> name -> package level func
-	Methods map[string][]*Func             // method name -> every method with that name
-	Recv    map[string][]*Func             // "pkgPath|receiver type" -> methods
-	Fields  map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
-	Ifaces  map[string][]string            // "pkg|Interface" -> exported method names
-	PkgDocs map[string]string
-	Diag    Diag
+	Root      string
+	Path      string
+	Name      string
+	Files     []*FileCtx
+	Funcs     map[string]*Func
+	PKG       map[string]map[string]*Func    // pkgPath -> name -> package level func
+	Methods   map[string][]*Func             // method name -> every method with that name
+	Recv      map[string][]*Func             // "pkgPath|receiver type" -> methods
+	Fields    map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
+	Ifaces    map[string][]string            // "pkg|Interface" -> exported method names
+	Types     map[string]map[string]bool     // pkgPath -> every declared type name
+	FuncTypes map[string]bool                // "pkg|Type" -> declared func type
+	FuncVars  map[string]map[string]bool     // pkgPath -> package var of func type
+	Vars      map[string]FieldRef            // "pkgPath|name" -> declared package var/const type
+	PkgDocs   map[string]string
+	Diag      Diag
 }
 
 var skipDirs = map[string]bool{
@@ -122,14 +141,18 @@ func loadModule(root string) (*Module, error) {
 		return nil, err
 	}
 	m := &Module{
-		Root:    abs,
-		Funcs:   map[string]*Func{},
-		PKG:     map[string]map[string]*Func{},
-		Methods: map[string][]*Func{},
-		Recv:    map[string][]*Func{},
-		Fields:  map[string]map[string]FieldRef{},
-		Ifaces:  map[string][]string{},
-		PkgDocs: map[string]string{},
+		Root:      abs,
+		Funcs:     map[string]*Func{},
+		PKG:       map[string]map[string]*Func{},
+		Methods:   map[string][]*Func{},
+		Recv:      map[string][]*Func{},
+		Fields:    map[string]map[string]FieldRef{},
+		Ifaces:    map[string][]string{},
+		Types:     map[string]map[string]bool{},
+		FuncTypes: map[string]bool{},
+		FuncVars:  map[string]map[string]bool{},
+		Vars:      map[string]FieldRef{},
+		PkgDocs:   map[string]string{},
 	}
 	modPath, modName := readGoMod(abs)
 	m.Path, m.Name = modPath, modName
@@ -169,12 +192,26 @@ func loadModule(root string) (*Module, error) {
 	}
 
 	for _, fc := range m.Files {
+		if m.Types[fc.PkgPath] == nil {
+			m.Types[fc.PkgPath] = map[string]bool{}
+		}
 		for _, d := range fc.Ast.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+				m.indexFuncVars(fc, gd)
+				continue
+			}
 			if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.TYPE {
 				for _, spec := range gd.Specs {
 					ts, ok := spec.(*ast.TypeSpec)
 					if !ok {
 						continue
+					}
+					if m.Types[fc.PkgPath] == nil {
+						m.Types[fc.PkgPath] = map[string]bool{}
+					}
+					m.Types[fc.PkgPath][ts.Name.Name] = true
+					if _, ok := ts.Type.(*ast.FuncType); ok {
+						m.FuncTypes[fc.PkgPath+"|"+ts.Name.Name] = true
 					}
 					if it, ok := ts.Type.(*ast.InterfaceType); ok {
 						var names []string
@@ -198,8 +235,9 @@ func loadModule(root string) (*Module, error) {
 					for _, fld := range st.Fields.List {
 						typ := typeString(fld.Type)
 						pkg, name := typeRef(fc, typ)
+						isFunc := m.isFuncType(fc, fld.Type)
 						for _, n := range fld.Names {
-							fields[n.Name] = FieldRef{Pkg: pkg, Name: name, Text: typ}
+							fields[n.Name] = FieldRef{Pkg: pkg, Name: name, Text: typ, Func: isFunc}
 						}
 					}
 					if len(fields) > 0 {
@@ -221,6 +259,10 @@ func loadModule(root string) (*Module, error) {
 				Decl:    fd,
 				Start:   line(fd.Pos()),
 				End:     line(fd.End()),
+				Vars:    m.fieldRefs(fc, fd.Type.Params),
+			}
+			for n, ref := range m.fieldRefs(fc, fd.Type.Results) {
+				f.Vars[n] = ref
 			}
 			if fd.Doc != nil {
 				f.Doc = cleanDoc(fd.Doc.Text())
@@ -240,9 +282,18 @@ func loadModule(root string) (*Module, error) {
 		}
 	}
 
+	for _, fc := range m.Files {
+		for _, d := range fc.Ast.Decls {
+			if gd, ok := d.(*ast.GenDecl); ok && (gd.Tok == token.VAR || gd.Tok == token.CONST) {
+				m.indexPackageVars(fc, gd)
+			}
+		}
+	}
+
 	for _, f := range m.Funcs {
 		f.Calls = m.callsOf(f)
 	}
+	m.recount()
 	return m, nil
 }
 
@@ -352,6 +403,7 @@ func (m *Module) skipFile(rel, reason string) {
 func (m *Module) callsOf(f *Func) []Call {
 	var out []Call
 	seen := map[string]bool{}
+	dyn := m.funcVars(f)
 	ast.Inspect(f.Decl.Body, func(n ast.Node) bool {
 		ce, ok := n.(*ast.CallExpr)
 		if !ok {
@@ -398,7 +450,7 @@ func (m *Module) callsOf(f *Func) []Call {
 				if fn := m.methodOn(ref.Pkg, ref.Name, c.Sel); fn != nil {
 					c.Target = fn
 					c.PkgPath = fn.PkgPath
-				} else if fn := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); fn != nil {
+				} else if fn, _ := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); fn != nil {
 					c.Target = fn
 					c.PkgPath = fn.PkgPath
 				}
@@ -414,23 +466,13 @@ func (m *Module) callsOf(f *Func) []Call {
 				}
 			}
 		}
+		// methods on values whose type is declared: parameters, named results and
+		// package variables. Assignments are deliberately not followed.
+		if c.Target == nil {
+			m.resolveDeclared(f, &c)
+		}
+		c.Why = m.why(f, c, dyn)
 		out = append(out, c)
-		m.Diag.Calls++
-		if c.Target != nil {
-			m.Diag.Resolved++
-			return true
-		}
-		if m.unresolvedCall(f, c) {
-			m.Diag.Unresolved++
-			if len(m.Diag.Unres) < diagLimit {
-				m.Diag.Unres = append(m.Diag.Unres, UnresolvedCall{
-					Func: fnName(f),
-					Expr: c.Expr,
-					File: f.File.Rel,
-					Line: c.Line,
-				})
-			}
-		}
 		return true
 	})
 	return out
@@ -444,18 +486,463 @@ var builtins = map[string]bool{
 	"imag": true, "close": true, "clear": true, "min": true, "max": true,
 }
 
-// unresolvedCall reports whether a call should have resolved inside this
-// module but did not. Stdlib and framework calls are not blind spots: their
-// PkgPath is in no package of this module.
-func (m *Module) unresolvedCall(f *Func, c Call) bool {
-	if c.PkgPath != "" {
-		_, inModule := m.PKG[c.PkgPath]
-		return inModule
+// basicTypes are conversions to a predeclared type. They read like calls but
+// have no function behind them.
+var basicTypes = map[string]bool{
+	"bool": true, "string": true, "any": true,
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"uintptr": true, "byte": true, "rune": true,
+	"float32": true, "float64": true, "complex64": true, "complex128": true,
+}
+
+// why names the one reason c did or did not resolve. A found target wins over
+// every heuristic; a conversion or a builtin is never a blind spot even when
+// its name also looks like a missing function.
+func (m *Module) why(f *Func, c Call, dyn map[string]bool) string {
+	if c.Target != nil {
+		return "resolved"
 	}
-	if c.Base != "" || c.Qual != "" {
+	if m.isConvert(f, c) {
+		return "convert"
+	}
+	if c.Base == "" && builtins[c.Sel] {
+		return "builtin"
+	}
+	if m.isFuncValue(f, c, dyn) {
+		return "dynamic"
+	}
+	if p, ok := f.File.Imports[c.Base]; ok {
+		if c.Qual == c.Base {
+			if !m.inModule(p) {
+				return "external"
+			}
+			return "blind" // an in-module package function the index does not hold
+		}
+		// a package-qualified value: config.DB.Exec
+		if field := firstField(c.Qual, c.Base); field != "" {
+			if ref, ok := m.Vars[p+"|"+field]; ok {
+				return m.declReason(f, ref, c.Sel, c.Qual == c.Base+"."+field)
+			}
+		}
+		if !m.inModule(p) {
+			return "external"
+		}
+		return "unknown" // a method on a package-level value of unknown type
+	}
+	if c.Base == "" {
+		return "blind"
+	}
+	if fieldCall(c.Qual, f.RecvVar) {
+		field := c.Qual[len(f.RecvVar)+1:]
+		if ref, ok := m.Fields[f.PkgPath+"|"+f.Recv][field]; ok {
+			if !m.hasPkg(ref.Pkg) {
+				return "external"
+			}
+			if _, ambiguous := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); ambiguous {
+				return "ambiguous"
+			}
+		}
+	}
+	// a value of a declared type: parameter, named result or package variable
+	if c.Qual == c.Base {
+		if ref, ok := m.declaredType(f, c.Base); ok {
+			return m.declReason(f, ref, c.Sel, true)
+		}
+	}
+	return "unknown"
+}
+
+// declaredType is the declared type of a value: a parameter or named result of
+// f first, then a package-level variable in its package.
+func (m *Module) declaredType(f *Func, name string) (FieldRef, bool) {
+	if ref, ok := f.Vars[name]; ok {
+		return ref, true
+	}
+	ref, ok := m.Vars[f.PkgPath+"|"+name]
+	return ref, ok
+}
+
+// declReason names why a call on a declared type did or did not resolve. An
+// in-module struct with no such method is blind: that is a real in-module gap,
+// not an alias or a conversion. An interface with several implementations is
+// ambiguous, and a type with no implementation indexed is unknown.
+func (m *Module) declReason(f *Func, ref FieldRef, sel string, direct bool) string {
+	if ref.Name == "" {
+		return "unknown"
+	}
+	if !m.inModule(ref.Pkg) {
+		return "external"
+	}
+	if !direct {
+		return "unknown" // the call is further down the chain than the declared value
+	}
+	if !m.Types[ref.Pkg][ref.Name] {
+		return "unknown" // a type parameter or a type the index does not hold
+	}
+	if m.methodOn(ref.Pkg, ref.Name, sel) != nil {
+		return "resolved"
+	}
+	if _, ok := m.Ifaces[ref.Pkg+"|"+ref.Name]; ok {
+		if _, ambiguous := m.ifaceImpl(ref.Pkg, ref.Name, sel, f); ambiguous {
+			return "ambiguous"
+		}
+		return "unknown"
+	}
+	return "blind"
+}
+
+// resolveDeclared fills a target from a declared receiver type. It handles both
+// s.GetUser() (a parameter or package variable) and config.DB.Exec (the first
+// selector of a package-qualified value). Anything assigned inside a function
+// stays unknown, so tx := db.Begin() is not guessed from the call on the right.
+func (m *Module) resolveDeclared(f *Func, c *Call) {
+	var ref FieldRef
+	var ok, direct bool
+	if c.Qual == c.Base {
+		if c.Base == "" {
+			return
+		}
+		if _, isImport := f.File.Imports[c.Base]; isImport {
+			return
+		}
+		ref, ok = m.declaredType(f, c.Base)
+		direct = true
+	} else if p, isImport := f.File.Imports[c.Base]; isImport {
+		field := firstField(c.Qual, c.Base)
+		if field == "" {
+			return
+		}
+		ref, ok = m.Vars[p+"|"+field]
+		direct = c.Qual == c.Base+"."+field
+	}
+	if !ok || !direct || ref.Name == "" || !m.inModule(ref.Pkg) {
+		return
+	}
+	if fn := m.methodOn(ref.Pkg, ref.Name, c.Sel); fn != nil {
+		c.Target = fn
+		c.PkgPath = fn.PkgPath
+		return
+	}
+	if fn, _ := m.ifaceImpl(ref.Pkg, ref.Name, c.Sel, f); fn != nil {
+		c.Target = fn
+		c.PkgPath = fn.PkgPath
+		c.Iface = ref.Text
+	}
+}
+
+// firstField returns the selector directly after base in a dotted expression:
+// DB for config.DB.Exec and for config.DB.Model().Where.
+func firstField(qual, base string) string {
+	rest := strings.TrimPrefix(qual, base+".")
+	if rest == qual {
+		return ""
+	}
+	if i := strings.IndexByte(rest, '.'); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
+}
+
+// isConvert reports whether the call is a type conversion: a basic type, or a
+// type declared by a package whose import path this module owns.
+func (m *Module) isConvert(f *Func, c Call) bool {
+	if c.Base == "" {
+		return basicTypes[c.Sel] || m.Types[f.PkgPath][c.Sel]
+	}
+	// pkg.Type(x): the receiver is the package itself. A chain such as
+	// pkg.Type.Method() is a method call, not a conversion.
+	if c.Qual != c.Base {
 		return false
 	}
-	return !builtins[c.Sel] && m.PKG[f.PkgPath][c.Sel] == nil
+	p, ok := f.File.Imports[c.Base]
+	return ok && m.Types[p][c.Sel]
+}
+
+// isFuncValue reports whether the callee is a function value rather than a
+// declared function: a func-typed parameter, local, package variable or field.
+func (m *Module) isFuncValue(f *Func, c Call, dyn map[string]bool) bool {
+	if c.Base == "" {
+		return dyn[c.Sel] || m.FuncVars[f.PkgPath][c.Sel]
+	}
+	if fieldCall(c.Qual, f.RecvVar) {
+		field := c.Qual[len(f.RecvVar)+1:]
+		ref, ok := m.Fields[f.PkgPath+"|"+f.Recv][field]
+		return ok && ref.Func
+	}
+	// a call on a func-typed field of the receiver itself: s.cb()
+	if f.RecvVar != "" && c.Qual == f.RecvVar {
+		ref, ok := m.Fields[f.PkgPath+"|"+f.Recv][c.Sel]
+		return ok && ref.Func
+	}
+	return false
+}
+
+// funcVars collects the parameters and locals of f that hold a function value.
+// A call through one is dynamic dispatch: there is no static target to find.
+func (m *Module) funcVars(f *Func) map[string]bool {
+	out := map[string]bool{}
+	if f.Decl == nil {
+		return out
+	}
+	if f.Decl.Type != nil && f.Decl.Type.Params != nil {
+		for _, p := range f.Decl.Type.Params.List {
+			if !m.isFuncType(f.File, p.Type) {
+				continue
+			}
+			for _, n := range p.Names {
+				out[n.Name] = true
+			}
+		}
+	}
+	ast.Inspect(f.Decl.Body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			for i, rhs := range x.Rhs {
+				if i >= len(x.Lhs) || !isFuncRef(rhs) {
+					continue
+				}
+				if id, ok := x.Lhs[i].(*ast.Ident); ok {
+					out[id.Name] = true
+				}
+			}
+		case *ast.ValueSpec:
+			if !m.isFuncType(f.File, x.Type) && !hasFuncRef(x.Values) {
+				return true
+			}
+			for _, n := range x.Names {
+				out[n.Name] = true
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// indexFuncVars records package variables that hold a function value, so a call
+// through one is dynamic instead of a missing in-module function.
+func (m *Module) indexFuncVars(fc *FileCtx, gd *ast.GenDecl) {
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		if !m.isFuncType(fc, vs.Type) && !hasFuncRef(vs.Values) {
+			continue
+		}
+		if m.FuncVars[fc.PkgPath] == nil {
+			m.FuncVars[fc.PkgPath] = map[string]bool{}
+		}
+		for _, n := range vs.Names {
+			m.FuncVars[fc.PkgPath][n.Name] = true
+		}
+	}
+}
+
+// hasFuncRef reports whether a value could hold a function: a literal, or a
+// name that may point at one (a function or a package-level value).
+func hasFuncRef(vals []ast.Expr) bool {
+	for _, v := range vals {
+		if isFuncRef(v) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFuncRef(e ast.Expr) bool {
+	switch e.(type) {
+	case *ast.FuncLit, *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.IndexListExpr:
+		return true
+	}
+	return false
+}
+
+// isFuncType reports whether the written type is a function type: a literal
+// func type or a named type this module declares as one.
+func (m *Module) isFuncType(file *FileCtx, e ast.Expr) bool {
+	if _, ok := e.(*ast.FuncType); ok {
+		return true
+	}
+	pkg, name := typeRef(file, typeString(e))
+	return name != "" && m.FuncTypes[pkg+"|"+name]
+}
+
+func (m *Module) hasPkg(p string) bool { return m.PKG[p] != nil }
+
+// inModule reports whether a package has source in this module. Types is seeded
+// for every parsed package, so type-only packages are in-module too.
+func (m *Module) inModule(p string) bool { return m.Types[p] != nil }
+
+// fieldRefs resolves a parameter or result list through the file's imports,
+// exactly like struct fields.
+func (m *Module) fieldRefs(fc *FileCtx, fl *ast.FieldList) map[string]FieldRef {
+	out := map[string]FieldRef{}
+	if fl == nil {
+		return out
+	}
+	for _, fld := range fl.List {
+		ref := m.typeRefOf(fc, fld.Type)
+		if ref.Name == "" {
+			continue
+		}
+		for _, n := range fld.Names {
+			out[n.Name] = ref
+		}
+	}
+	return out
+}
+
+// indexPackageVars records package var/const types that can be read from the
+// declaration. Composite literals are read from their written type; a single
+// in-module constructor is followed through its result type. Everything else is
+// left out rather than guessed.
+func (m *Module) indexPackageVars(fc *FileCtx, gd *ast.GenDecl) {
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		ref := FieldRef{}
+		if vs.Type != nil {
+			ref = m.typeRefOf(fc, vs.Type)
+		} else {
+			ref, _ = m.valueRef(fc, vs)
+		}
+		if ref.Name == "" {
+			continue
+		}
+		for _, n := range vs.Names {
+			m.Vars[fc.PkgPath+"|"+n.Name] = ref
+		}
+	}
+}
+
+// valueRef reads a value's type from a composite literal or an in-module
+// constructor's single result. A call into another package is not followed.
+func (m *Module) valueRef(fc *FileCtx, vs *ast.ValueSpec) (FieldRef, bool) {
+	if len(vs.Values) != 1 {
+		return FieldRef{}, false
+	}
+	switch v := vs.Values[0].(type) {
+	case *ast.CompositeLit:
+		if v.Type == nil {
+			return FieldRef{}, false
+		}
+		return m.typeRefOf(fc, v.Type), true
+	case *ast.UnaryExpr:
+		if v.Op != token.AND {
+			return FieldRef{}, false
+		}
+		if cl, ok := v.X.(*ast.CompositeLit); ok && cl.Type != nil {
+			return m.typeRefOf(fc, cl.Type), true
+		}
+	case *ast.CallExpr:
+		if len(vs.Names) != 1 {
+			return FieldRef{}, false // one value cannot type several names
+		}
+		id, ok := unindex(v.Fun).(*ast.Ident)
+		if !ok {
+			return FieldRef{}, false
+		}
+		fn := m.PKG[fc.PkgPath][id.Name]
+		if fn == nil || fn.Decl == nil || fn.Decl.Type == nil || fn.Decl.Type.Results == nil {
+			return FieldRef{}, false
+		}
+		if len(fn.Decl.Type.Results.List) != 1 {
+			return FieldRef{}, false
+		}
+		ref := m.typeRefOf(fn.File, fn.Decl.Type.Results.List[0].Type)
+		return ref, ref.Name != ""
+	}
+	return FieldRef{}, false
+}
+
+// externalPkg marks a type whose qualifier is not a known import alias. The
+// written type still names a package, so it is outside this module even when we
+// cannot recover its import path (an unaliased package whose name differs from
+// the last path element, such as valkey-go imported as valkey).
+const externalPkg = "\x00external"
+
+// typeRefOf turns a written type into the FieldRef used by fields, parameters
+// and package variables.
+func (m *Module) typeRefOf(fc *FileCtx, e ast.Expr) FieldRef {
+	if e == nil {
+		return FieldRef{}
+	}
+	text := typeString(e)
+	pkg, name := typeRef(fc, text)
+	if alias, ok := typeAlias(text); ok {
+		if _, imported := fc.Imports[alias]; !imported {
+			pkg = externalPkg
+		}
+	}
+	return FieldRef{Pkg: pkg, Name: name, Text: text, Func: m.isFuncType(fc, e)}
+}
+
+// typeAlias returns the qualifier of a written type: gorm in *gorm.DB and
+// valkey in valkey.Client.
+func typeAlias(text string) (string, bool) {
+	t := strings.TrimPrefix(text, "*")
+	i := strings.LastIndex(t, ".")
+	if i < 0 {
+		return "", false
+	}
+	alias := t[:i]
+	if j := strings.LastIndexAny(alias, "[]*"); j >= 0 {
+		alias = alias[j+1:]
+	}
+	return alias, alias != ""
+}
+
+// recount rebuilds the call diagnostics from the per-call reasons. It runs at
+// the end of loading and again after typed resolution, so -typed moves the
+// metric instead of leaving a stale count. File diagnostics survive untouched.
+func (m *Module) recount() {
+	d := m.Diag
+	d.Calls, d.Resolved, d.Unresolved = 0, 0, 0
+	d.External, d.Convert, d.Dynamic, d.Ambiguous, d.Unknown = 0, 0, 0, 0, 0
+	d.Why = map[string]int{}
+	d.Unres = nil
+	for _, f := range m.Funcs {
+		for i := range f.Calls {
+			c := &f.Calls[i]
+			if c.Target != nil {
+				c.Why = "resolved"
+			}
+			if c.Why == "" {
+				c.Why = "unknown"
+			}
+			d.Calls++
+			d.Why[c.Why]++
+			switch c.Why {
+			case "resolved":
+				d.Resolved++
+			case "blind":
+				d.Unresolved++
+				if len(d.Unres) < diagLimit {
+					d.Unres = append(d.Unres, UnresolvedCall{
+						Func:   fnName(f),
+						Expr:   c.Expr,
+						File:   f.File.Rel,
+						Line:   c.Line,
+						Reason: c.Why,
+					})
+				}
+			case "external":
+				d.External++
+			case "convert":
+				d.Convert++
+			case "dynamic":
+				d.Dynamic++
+			case "ambiguous":
+				d.Ambiguous++
+			case "unknown":
+				d.Unknown++
+			}
+		}
+	}
+	m.Diag = d
 }
 
 // fieldCall reports whether the call hangs off a field of the receiver,
@@ -496,11 +983,12 @@ func typeRef(file *FileCtx, typeText string) (string, string) {
 // ifaceImpl finds the method sel on the one concrete type that declares every
 // method of the interface: the receiver an interface call reaches when there is
 // exactly one, as with a repository interface and its store. Generated stubs
-// are skipped, and an ambiguous interface resolves to nothing.
-func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
+// are skipped. More than one implementation is reported as ambiguous instead of
+// guessed, so the caller can say why the call has no target.
+func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) (*Func, bool) {
 	ms, ok := m.Ifaces[pkgPath+"|"+name]
 	if !ok {
-		return nil
+		return nil, false
 	}
 	var match *Func
 	for _, fn := range m.Methods[sel] {
@@ -515,11 +1003,11 @@ func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
 			continue
 		}
 		if match != nil {
-			return nil // more than one implementation: do not guess
+			return nil, true // more than one implementation: do not guess
 		}
 		match = fn
 	}
-	return match
+	return match, false
 }
 
 // declaresAll reports whether the type has a method for every name.
