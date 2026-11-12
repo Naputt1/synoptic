@@ -11,6 +11,7 @@ import { Shell } from '@/components/Shell'
 import { DataCtx } from '@/lib/context'
 import { loadData } from '@/lib/data'
 import type { Data } from '@/lib/types'
+import { DiagnosticsView } from '@/views/Diagnostics'
 import { FlowView } from '@/views/Flow'
 import { FnView } from '@/views/Fn'
 import { PipelineView } from '@/views/Pipeline'
@@ -75,6 +76,11 @@ const stageRoute = createRoute({
 })
 const fnRoute = createRoute({ getParentRoute: () => rootRoute, path: '/f', component: FnView })
 const typeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/t', component: TypeView })
+const diagRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/diag',
+  component: DiagnosticsView,
+})
 const rpcRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rpc', component: RPCView })
 const rpcMethodRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -89,6 +95,7 @@ const routeTree = rootRoute.addChildren([
   stageRoute,
   fnRoute,
   typeRoute,
+  diagRoute,
   rpcRoute,
   rpcMethodRoute,
 ])

@@ -22,6 +22,7 @@ export type Stage = {
   x?: string
   fk?: string
   in?: Input[]
+  chg?: boolean
 }
 
 export type DocField = { n: string; t?: string; tg?: string; rq?: boolean }
@@ -137,6 +138,7 @@ export type Route = {
   st?: StreamInfo
   ch: Stage[]
   doc?: Doc
+  chg?: boolean
 }
 
 export type Middleware = {
@@ -221,6 +223,7 @@ export type FuncFlow = {
   in?: Input[]
   fx?: Effect[]
   rpc?: string
+  trunc?: boolean
 }
 
 export type StageTiming = {
@@ -269,6 +272,41 @@ export type SynType = {
 /** One entry point of a multi-service module, with what it owns. */
 export type Svc = { n: string; d?: string; e?: string; routes: number; rpcs: number }
 
+/** What the loader could not read or resolve, baked into the page. */
+export type Diag = {
+  parsed: number
+  skipped: number
+  read?: number
+  parse?: number
+  generated?: number
+  build?: number
+  skip?: SkippedFile[]
+  calls: number
+  resolved: number
+  unresolved: number
+  unres?: UnresolvedCall[]
+  truncated?: number
+}
+
+export type SkippedFile = {
+  p: string
+  r: 'read' | 'parse' | 'generated' | 'build' | string
+}
+
+export type UnresolvedCall = {
+  fn: string
+  e: string
+  f?: string
+  l?: number
+}
+
+/** The -base view: the ref compared against, and what it touched. */
+export type Change = {
+  ref: string
+  files: number
+  routes: number
+}
+
 export type Data = {
   repo: string
   mod: string
@@ -280,6 +318,9 @@ export type Data = {
   flows: Record<string, FuncFlow>
   types?: Record<string, SynType>
   timing?: Record<string, RouteTiming>
+  diag: Diag
+  change?: Change
+  redact?: boolean
 }
 
 declare global {

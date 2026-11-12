@@ -3,6 +3,7 @@ import { Search } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { AppLink } from '@/components/ui/link'
 import { Segmented } from '@/components/ui/segmented'
 import { useData, useSvc, useSvcSwitch } from '@/lib/context'
 import { routeHref, stageHref } from '@/lib/data'
@@ -45,6 +46,7 @@ export function Topbar({ onSearch }: { onSearch: () => void }) {
             : 'route'
           : 'router'
   const ri = parts[0] === 'r' ? Number(parts[1]) : -1
+  const blind = (data.diag?.skipped ?? 0) + (data.diag?.unresolved ?? 0)
   const go = (lv: string) => {
     if (lv === 'router') goto('/')
     else if (lv === 'route' && ri >= 0) goto(routeHref(ri))
@@ -141,6 +143,16 @@ export function Topbar({ onSearch }: { onSearch: () => void }) {
             ⌘K
           </kbd>
         </Button>
+        {blind > 0 && (
+          <AppLink
+            href="/diag"
+            className="border-line text-faint hover:border-warn/45 hover:text-ink flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] transition-colors"
+            title="files the loader skipped and in-module calls it could not resolve"
+          >
+            <b className="text-warn font-semibold">{blind}</b> blind
+            {blind === 1 ? ' spot' : ' spots'}
+          </AppLink>
+        )}
       </div>
     </header>
   )

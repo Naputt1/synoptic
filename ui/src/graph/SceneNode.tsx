@@ -281,11 +281,19 @@ function SceneNodeInner({ data }: NodeProps<SNode>) {
           )}
         </div>
 
-        {(d.sub || (d.tags && d.tags.length > 0) || isStage) && (
+        {(d.sub || d.chg || (d.tags && d.tags.length > 0) || isStage) && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {d.sub && (
               <span className="text-mut min-w-0 flex-1 truncate text-[10.5px]" title={d.sub}>
                 {d.sub}
+              </span>
+            )}
+            {d.chg && (
+              <span
+                title="touches a file changed since the base ref"
+                className="border-warn/45 text-warn shrink-0 rounded-[3px] border px-1 text-[9px] tracking-[0.1em] uppercase"
+              >
+                changed
               </span>
             )}
             {(d.tags ?? []).map((t) => (

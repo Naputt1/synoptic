@@ -16,12 +16,16 @@ export function RouterView() {
   const [proto, setProto] = useState<'all' | 'http' | 'ws' | 'sse'>('all')
   const scene = useMemo(() => buildRouterScene(data, focus, proto, svc), [data, focus, proto, svc])
   const label = focus ? '/' + focus : data.repo
-  const count = data.routes.filter(
+  const shown = data.routes.filter(
     (r) =>
       (proto === 'all' ? true : proto === 'http' ? !r.pr : r.pr === proto) &&
       (!svc || r.svc === svc) &&
       (focus ? r.p === '/' + focus || r.p.startsWith('/' + focus + '/') : true),
-  ).length
+  )
+  const count = shown.length
+  const changed = shown.filter((r) => r.chg).length
+  const changeMeta =
+    data.change && changed > 0 ? ` · ${changed} changed since ${data.change.ref}` : ''
   const rpcServices = (data.services ?? []).filter((s) => !svc || s.svc === svc)
   const rpcCount = rpcServices.reduce((n, s) => n + s.methods.length, 0)
 
@@ -33,7 +37,7 @@ export function RouterView() {
           <ScopeCard
             title={label}
             badge="router"
-            meta={`${count} under this path · click a box to open it`}
+            meta={`${count} under this path${changeMeta} · click a box to open it`}
             note="each column is one path segment. open a group to walk deeper, a route to see its middleware."
           />
           <div className="border-line bg-panel/20 flex items-center gap-2 border-b px-4 py-1.5">
