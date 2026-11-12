@@ -1397,10 +1397,7 @@ function RouterView() {
   const params = useParams({ strict: false }) as { _splat?: string }
   const focus = params._splat ?? ''
   const [proto, setProto] = useState<'all' | 'http' | 'ws' | 'sse'>('all')
-  const scene = useMemo(
-    () => buildRouterScene(data, focus, proto, svc),
-    [data, focus, proto, svc],
-  )
+  const scene = useMemo(() => buildRouterScene(data, focus, proto, svc), [data, focus, proto, svc])
   const label = focus ? '/' + focus : data.repo
   const count = data.routes.filter(
     (r) =>

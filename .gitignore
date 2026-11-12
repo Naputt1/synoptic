@@ -2,6 +2,8 @@
 /synoptic
 /out/
 *.html
+# ...but the Vite entry point is source, not output
+!ui/index.html
 
 # generated data
 ui/public/synoptic.json

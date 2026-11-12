@@ -11,7 +11,28 @@ open /path/to/repo/synoptic.html
 
 The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; `bun fmt` writes formatting.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI).
+`ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
+
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (dump the data for the dev UI), `-html` (default `true`; `-html=false` prints the console report only), `-trace <file>` (overlay timings from a span export), `-version` (print `synoptic <version>` and exit).
+
+## Checks
+
+CI runs the same commands:
+
+```bash
+# ui
+cd ui && bun install --frozen-lockfile
+bun run typecheck
+bun run lint
+
+# go (from the repo root, after the UI build)
+go build ./...
+pkgs=$(go list ./... | grep -v '/node_modules/')
+go vet $pkgs
+go test $pkgs
+```
+
+`make check` runs both halves, and `make build` builds the UI and then the binary.
 
 ## What you see
 
