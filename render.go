@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -542,22 +543,22 @@ func dirOf(p string) string {
 	return "."
 }
 
-func report(d JData, htmlPath, jsonPath string) {
-	fmt.Printf("%s\n", d.Repo)
-	fmt.Printf("  routes     %d\n", d.Stats.Routes)
-	fmt.Printf("  groups     %d\n", d.Stats.Groups)
-	fmt.Printf("  middleware %d\n", d.Stats.Middleware)
+func report(w io.Writer, d JData, htmlPath, jsonPath, openapiPath, mdPath string) {
+	fmt.Fprintf(w, "%s\n", d.Repo)
+	fmt.Fprintf(w, "  routes     %d\n", d.Stats.Routes)
+	fmt.Fprintf(w, "  groups     %d\n", d.Stats.Groups)
+	fmt.Fprintf(w, "  middleware %d\n", d.Stats.Middleware)
 	if d.Stats.Streams > 0 {
-		fmt.Printf("  streams    %d (%d ws, %d sse)\n", d.Stats.Streams, d.Stats.WS, d.Stats.SSE)
+		fmt.Fprintf(w, "  streams    %d (%d ws, %d sse)\n", d.Stats.Streams, d.Stats.WS, d.Stats.SSE)
 	}
 	if d.Stats.Services > 0 {
-		fmt.Printf("  rpc        %d services, %d methods\n", d.Stats.Services, d.Stats.RPCs)
+		fmt.Fprintf(w, "  rpc        %d services, %d methods\n", d.Stats.Services, d.Stats.RPCs)
 	}
-	fmt.Printf("  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
-	fmt.Printf("  flows baked                  %d functions\n", d.Stats.Funcs)
+	fmt.Fprintf(w, "  handlers with a doc comment  %d/%d\n", d.Stats.Documented, d.Stats.Routes)
+	fmt.Fprintf(w, "  flows baked                  %d functions\n", d.Stats.Funcs)
 	g := d.Diag
 	if g.Skipped > 0 {
-		fmt.Printf("  files      %d parsed, %d skipped", g.Parsed, g.Skipped)
+		fmt.Fprintf(w, "  files      %d parsed, %d skipped", g.Parsed, g.Skipped)
 		var why []string
 		for _, r := range []struct {
 			n     int
@@ -568,14 +569,14 @@ func report(d JData, htmlPath, jsonPath string) {
 			}
 		}
 		if len(why) > 0 {
-			fmt.Printf(" (%s)", strings.Join(why, ", "))
+			fmt.Fprintf(w, " (%s)", strings.Join(why, ", "))
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 		for i, f := range g.Skip {
 			if i == 5 {
 				break
 			}
-			fmt.Printf("             - %s (%s)\n", f.Path, f.Reason)
+			fmt.Fprintf(w, "             - %s (%s)\n", f.Path, f.Reason)
 		}
 	}
 	if g.Calls > 0 {
@@ -584,29 +585,35 @@ func report(d JData, htmlPath, jsonPath string) {
 		if honest > 0 {
 			pct = float64(g.Resolved) / float64(honest) * 100
 		}
-		fmt.Printf("  calls      %d total: %d resolved, %d external, %d convert, %d builtin, %d blind, %d dynamic, %d ambiguous, %d unknown\n",
+		fmt.Fprintf(w, "  calls      %d total: %d resolved, %d external, %d convert, %d builtin, %d blind, %d dynamic, %d ambiguous, %d unknown\n",
 			g.Calls, g.Resolved, g.External, g.Convert, g.Why["builtin"], g.Unresolved, g.Dynamic, g.Ambiguous, g.Unknown)
-		fmt.Printf("             honest %d/%d = %.1f%% (external, convert and builtin are not blind spots)\n", g.Resolved, honest, pct)
+		fmt.Fprintf(w, "             honest %d/%d = %.1f%% (external, convert and builtin are not blind spots)\n", g.Resolved, honest, pct)
 		for i, c := range g.Unres {
 			if i == 5 {
 				break
 			}
-			fmt.Printf("             - %s: %s (%s:%d)\n", c.Func, c.Expr, c.File, c.Line)
+			fmt.Fprintf(w, "             - %s: %s (%s:%d)\n", c.Func, c.Expr, c.File, c.Line)
 		}
 	}
 	if g.Truncated > 0 {
-		fmt.Printf("  flows      %d truncated at depth/limit\n", g.Truncated)
+		fmt.Fprintf(w, "  flows      %d truncated at depth/limit\n", g.Truncated)
 	}
 	if c := d.Change; c != nil {
-		fmt.Printf("  base %s: %d added, %d removed, %d changed (%d files touched)\n",
+		fmt.Fprintf(w, "  base %s: %d added, %d removed, %d changed (%d files touched)\n",
 			c.Ref, len(c.Added), len(c.Removed), c.Routes, c.Files)
 	}
 	if htmlPath != "" {
-		fmt.Printf("  written to %s\n", htmlPath)
+		fmt.Fprintf(w, "  written to %s\n", htmlPath)
 	} else {
-		fmt.Println("  no HTML written (-html=false)")
+		fmt.Fprintln(w, "  no HTML written (-html=false)")
 	}
 	if jsonPath != "" {
-		fmt.Printf("  json       %s\n", jsonPath)
+		fmt.Fprintf(w, "  json       %s\n", jsonPath)
+	}
+	if openapiPath != "" {
+		fmt.Fprintf(w, "  openapi    %s\n", openapiPath)
+	}
+	if mdPath != "" {
+		fmt.Fprintf(w, "  md         %s\n", mdPath)
 	}
 }

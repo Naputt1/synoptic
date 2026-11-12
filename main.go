@@ -23,6 +23,8 @@ func main() {
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
 	typed := flag.Bool("typed", false, "type-check the repo to resolve calls the AST pass misses (slower; adds golang.org/x/tools; the repo must resolve its imports)")
 	base := flag.String("base", "", "diff routes against this git ref: added, removed and modified, plus file-touch marks (best-effort; the base tree is analyzed read-only)")
+	openapi := flag.String("openapi", "", "write the proven route surface as OpenAPI 3.1 json; - means stdout")
+	md := flag.String("md", "", "write the route inventory as markdown, for a PR comment; - means stdout")
 	noSource := flag.Bool("no-source", false, "omit raw source from the page, keeping docs, files and line numbers")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -68,14 +70,37 @@ func main() {
 	if *noSource {
 		redact(&d)
 	}
+	if *openapi != "" {
+		blob, err := buildOpenAPI(d)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "openapi:", err)
+			os.Exit(1)
+		}
+		if err := writeExport(*openapi, blob); err != nil {
+			fmt.Fprintln(os.Stderr, "write openapi:", err)
+			os.Exit(1)
+		}
+	}
+	if *md != "" {
+		if err := writeExport(*md, buildMarkdown(d)); err != nil {
+			fmt.Fprintln(os.Stderr, "write md:", err)
+			os.Exit(1)
+		}
+	}
 	if *js != "" {
 		if err := writeJSON(*js, d); err != nil {
 			fmt.Fprintln(os.Stderr, "write json:", err)
 			os.Exit(1)
 		}
 	}
+	// A "-" export owns stdout; keep the human report on stderr so a pipe
+	// still receives exactly the document.
+	reportOut := os.Stdout
+	if *openapi == "-" || *md == "-" {
+		reportOut = os.Stderr
+	}
 	if !*html {
-		report(d, "", *js)
+		report(reportOut, d, "", *js, *openapi, *md)
 		return
 	}
 	if *out == "" {
@@ -85,5 +110,5 @@ func main() {
 		fmt.Fprintln(os.Stderr, "write:", err)
 		os.Exit(1)
 	}
-	report(d, *out, *js)
+	report(reportOut, d, *out, *js, *openapi, *md)
 }
