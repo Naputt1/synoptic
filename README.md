@@ -13,7 +13,7 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (analyze the tree at a git ref and diff its routes against the working tree: added, removed and modified, plus file-touch marks; the base is read-only and AST-only, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-openapi <file>` (write the proven route surface as OpenAPI 3.1 JSON; `-` writes stdout), `-md <file>` (write the route inventory as Markdown, for a PR comment; `-` writes stdout), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (analyze the tree at a git ref and diff its routes against the working tree: added, removed and modified, plus file-touch marks; the base is read-only and AST-only, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
 
 The default analysis path uses only the Go standard library. `-typed` is the one
 third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
@@ -281,6 +281,50 @@ The feature is best-effort: missing git, an unknown ref, no `go.mod` at the base
 or a timeout prints a warning and keeps the file-touch view. It never fails the
 run. The temp worktree is removed with `git worktree remove --force`, with
 `os.RemoveAll` as a fallback.
+
+## Exports (`-openapi`, `-md`)
+
+`-openapi` and `-md` write the same evidence the page shows, without the page.
+They are independent, work with or without `-html`, and do not change any other
+output. The report names each written path (`openapi <path>`, `md <path>`); a
+`-` path sends the document to stdout and moves the report to stderr, so a pipe
+receives only the document:
+
+```bash
+go run . -root /path/to/repo -html=false \
+  -openapi /tmp/api.json -md /tmp/routes.md
+```
+
+**Evidence only.** Both documents describe what the analyzer proved: path and
+query parameters with their read types, request fields from the bound struct,
+observed status codes, middleware order, streams and the handler location.
+Nothing is filled in from a comment or an annotation the source does not
+contain. A path parameter with no proven input sets
+`x-synoptic.unprovenPathParams`; a route with no observed status gets a
+`default` response; a method-agnostic `ANY` route is listed under
+`x-synoptic.skipped` when the same path has a concrete method, and kept under
+the path item's `x-synoptic-any` extension when it has none.
+
+The OpenAPI document is `3.1.0` with `info.title` = `<repo> API`, and
+`info.version` = the build version (`dev` unless set with ldflags). It omits
+`servers` because only the deployment knows them. Every operation carries
+`x-synoptic` with the handler `{name,file,line}`, middleware, service and
+`auth`; the top-level `x-synoptic` carries the repo, the `-base` change view
+when present, and the blind/unknown/skipped diagnostic counts. Output is
+deterministic: paths and methods are sorted, JSON is indented with two spaces,
+and operations get a unique sanitized `operationId`.
+
+The Markdown starts with the route count, then `## Changes vs <ref>` when
+`-base` produced a diff (added, removed and modified tables), then the full
+route table. With a change section the table sits inside
+`<details><summary>All routes</summary>` so a PR comment stays short. The
+footer repeats the blind-spot counts. There are no timestamps, so two runs over
+the same tree are byte-identical.
+
+**GitHub Action.** The Markdown is sized for a PR comment: run synoptic with
+`-base "$GITHUB_BASE_REF" -md routes.md`, then pass `routes.md` to the comment
+step. The OpenAPI file can be published as an artifact or diffed between
+revisions. Both work with `-html=false`, so the action needs no browser.
 
 ## Source redaction (`-no-source`)
 
