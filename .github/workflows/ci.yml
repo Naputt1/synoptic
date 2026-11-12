@@ -18,8 +18,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          # No go.sum: the module has no dependencies, so there is nothing to cache.
-          cache: false
+          # go.sum pins golang.org/x/tools, used only by the optional -typed mode.
+          cache: true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: ui/package.json
