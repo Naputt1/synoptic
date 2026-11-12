@@ -2,13 +2,16 @@ package main
 
 import (
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type FileCtx struct {
@@ -62,6 +65,7 @@ type Diag struct {
 	Read       int              `json:"read,omitempty"`
 	Parse      int              `json:"parse,omitempty"`
 	Generated  int              `json:"generated,omitempty"`
+	Build      int              `json:"build,omitempty"`
 	Skip       []SkippedFile    `json:"skip,omitempty"`
 	Calls      int              `json:"calls"`
 	Resolved   int              `json:"resolved"`
@@ -73,7 +77,7 @@ type Diag struct {
 // SkippedFile is one source file the loader did not read into the module.
 type SkippedFile struct {
 	Path   string `json:"p"`
-	Reason string `json:"r"` // read | parse | generated
+	Reason string `json:"r"` // read | parse | generated | build
 }
 
 // UnresolvedCall is a call that pointed inside this module and still had no
@@ -96,7 +100,7 @@ type Module struct {
 	Funcs   map[string]*Func
 	PKG     map[string]map[string]*Func    // pkgPath -> name -> package level func
 	Methods map[string][]*Func             // method name -> every method with that name
-	ByRecv  map[string][]*Func             // receiver type -> methods
+	Recv    map[string][]*Func             // "pkgPath|receiver type" -> methods
 	Fields  map[string]map[string]FieldRef // "pkg|Type" -> field -> declared type
 	Ifaces  map[string][]string            // "pkg|Interface" -> exported method names
 	PkgDocs map[string]string
@@ -119,7 +123,7 @@ func loadModule(root string) (*Module, error) {
 		Funcs:   map[string]*Func{},
 		PKG:     map[string]map[string]*Func{},
 		Methods: map[string][]*Func{},
-		ByRecv:  map[string][]*Func{},
+		Recv:    map[string][]*Func{},
 		Fields:  map[string]map[string]FieldRef{},
 		Ifaces:  map[string][]string{},
 		PkgDocs: map[string]string{},
@@ -149,47 +153,15 @@ func loadModule(root string) (*Module, error) {
 		return nil, err
 	}
 
-	for _, p := range paths {
-		rel, _ := filepath.Rel(abs, p)
-		rel = filepath.ToSlash(rel)
-		src, err := os.ReadFile(p)
-		if err != nil {
-			m.skipFile(rel, "read")
+	for _, r := range parseFiles(paths, abs, modPath, mods) {
+		if r.reason != "" {
+			m.skipFile(r.rel, r.reason)
 			continue
-		}
-		if strings.Contains(string(src[:min(len(src), 200)]), "Code generated") && len(src) > 400_000 {
-			m.skipFile(rel, "generated")
-			continue
-		}
-		af, err := parser.ParseFile(fset, p, src, parser.ParseComments)
-		if err != nil {
-			m.skipFile(rel, "parse")
-			continue
-		}
-		pkgPath := pkgPathFor(p, modPath, mods)
-		fc := &FileCtx{
-			Path:    p,
-			Rel:     rel,
-			PkgPath: pkgPath,
-			Imports: map[string]string{},
-			Lines:   strings.Split(string(src), "\n"),
-			Ast:     af,
 		}
 		m.Diag.Parsed++
-		for _, imp := range af.Imports {
-			path, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				continue
-			}
-			alias := path[strings.LastIndex(path, "/")+1:]
-			if imp.Name != nil {
-				alias = imp.Name.Name
-			}
-			fc.Imports[alias] = path
-		}
-		m.Files = append(m.Files, fc)
-		if af.Doc != nil && m.PkgDocs[pkgPath] == "" {
-			m.PkgDocs[pkgPath] = cleanDoc(af.Doc.Text())
+		m.Files = append(m.Files, r.fc)
+		if r.doc != "" && m.PkgDocs[r.fc.PkgPath] == "" {
+			m.PkgDocs[r.fc.PkgPath] = r.doc
 		}
 	}
 
@@ -259,7 +231,8 @@ func loadModule(root string) (*Module, error) {
 				m.PKG[f.PkgPath][f.Name] = f
 			} else {
 				m.Methods[f.Name] = append(m.Methods[f.Name], f)
-				m.ByRecv[f.Recv] = append(m.ByRecv[f.Recv], f)
+				k := recvKey(f.PkgPath, f.Recv)
+				m.Recv[k] = append(m.Recv[k], f)
 			}
 		}
 	}
@@ -268,6 +241,90 @@ func loadModule(root string) (*Module, error) {
 		f.Calls = m.callsOf(f)
 	}
 	return m, nil
+}
+
+// fileResult is one file's outcome from the parallel parse phase. The merge
+// step applies results in walk order, so module contents and diagnostics stay
+// deterministic even though files are read and parsed concurrently.
+type fileResult struct {
+	rel    string
+	reason string // read | parse | generated | build
+	fc     *FileCtx
+	doc    string
+}
+
+// parseFiles parses every path concurrently. The shared token.FileSet is safe
+// here: its AddFile and per-file line tables are mutex protected, and the
+// parser writes only to the file it owns. Positions therefore keep their
+// meaning and line numbers are unchanged.
+func parseFiles(paths []string, abs, modPath string, mods []modRoot) []fileResult {
+	out := make([]fileResult, len(paths))
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(paths) {
+		workers = len(paths)
+	}
+	var wg sync.WaitGroup
+	jobs := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				out[i] = parseOne(paths[i], abs, modPath, mods)
+			}
+		}()
+	}
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+func parseOne(p, abs, modPath string, mods []modRoot) fileResult {
+	rel, _ := filepath.Rel(abs, p)
+	rel = filepath.ToSlash(rel)
+	// Inactive files (GOOS/GOARCH suffixes and //go:build lines) must not be
+	// read: parsing them would invent routes that never ship on this platform.
+	if ok, err := build.Default.MatchFile(filepath.Dir(p), filepath.Base(p)); err != nil || !ok {
+		return fileResult{rel: rel, reason: "build"}
+	}
+	src, err := os.ReadFile(p)
+	if err != nil {
+		return fileResult{rel: rel, reason: "read"}
+	}
+	if strings.Contains(string(src[:min(len(src), 200)]), "Code generated") && len(src) > 400_000 {
+		return fileResult{rel: rel, reason: "generated"}
+	}
+	af, err := parser.ParseFile(fset, p, src, parser.ParseComments)
+	if err != nil {
+		return fileResult{rel: rel, reason: "parse"}
+	}
+	fc := &FileCtx{
+		Path:    p,
+		Rel:     rel,
+		PkgPath: pkgPathFor(p, modPath, mods),
+		Imports: map[string]string{},
+		Lines:   strings.Split(string(src), "\n"),
+		Ast:     af,
+	}
+	for _, imp := range af.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		alias := path[strings.LastIndex(path, "/")+1:]
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		}
+		fc.Imports[alias] = path
+	}
+	r := fileResult{rel: rel, fc: fc}
+	if af.Doc != nil {
+		r.doc = cleanDoc(af.Doc.Text())
+	}
+	return r
 }
 
 // skipFile records a source file the loader could not use. The counters stay
@@ -281,6 +338,8 @@ func (m *Module) skipFile(rel, reason string) {
 		m.Diag.Parse++
 	case "generated":
 		m.Diag.Generated++
+	case "build":
+		m.Diag.Build++
 	}
 	if len(m.Diag.Skip) < diagLimit {
 		m.Diag.Skip = append(m.Diag.Skip, SkippedFile{Path: rel, Reason: reason})
@@ -408,12 +467,10 @@ func fieldCall(qual, recvVar string) bool {
 // methodOn finds sel on the declared field type. It returns nil for interface
 // types: their methods live on implementations, not on the type itself.
 func (m *Module) methodOn(pkgPath, name, sel string) *Func {
-	for _, fn := range m.Methods[sel] {
-		if fn.PkgPath == pkgPath && fn.Recv == name {
-			return fn
-		}
+	if name == "" {
+		return nil
 	}
-	return nil
+	return m.Funcs[fnKey(pkgPath, name, sel)]
 }
 
 // typeRef resolves a type as written in a file to its package path and name,
@@ -464,14 +521,7 @@ func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) *Func {
 // declaresAll reports whether the type has a method for every name.
 func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
 	for _, n := range names {
-		found := false
-		for _, fn := range m.Methods[n] {
-			if fn.PkgPath == pkgPath && fn.Recv == recv {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if m.Funcs[fnKey(pkgPath, recv, n)] == nil {
 			return false
 		}
 	}
@@ -480,15 +530,7 @@ func (m *Module) declaresAll(pkgPath, recv string, names []string) bool {
 
 // recvMethods collects every method declared on a type.
 func (m *Module) recvMethods(pkgPath, recv string) []*Func {
-	var out []*Func
-	for _, fns := range m.Methods {
-		for _, fn := range fns {
-			if fn.PkgPath == pkgPath && fn.Recv == recv {
-				out = append(out, fn)
-			}
-		}
-	}
-	return out
+	return m.Recv[recvKey(pkgPath, recv)]
 }
 
 func describeCall(ce *ast.CallExpr) (Call, bool) {
@@ -633,6 +675,17 @@ func fnKey(pkg, recv, name string) string {
 		return pkg + "|" + recv + "|" + name
 	}
 	return pkg + "|" + name
+}
+
+// recvKey keys a receiver's methods by package and type, so two packages that
+// both declare type Service keep their methods apart.
+func recvKey(pkg, recv string) string { return pkg + "|" + recv }
+
+func splitRecvKey(key string) (pkg, recv string) {
+	if i := strings.LastIndexByte(key, '|'); i >= 0 {
+		return key[:i], key[i+1:]
+	}
+	return "", key
 }
 
 // modRoot is one go.mod inside the tree. A repo may hold several modules, each

@@ -64,8 +64,8 @@ func dispatchedImpl(m *Module, fn *Func, types map[string]JType) *Func {
 			continue
 		}
 		pkg, name := splitTypeKey(impls[0])
-		for _, cand := range m.ByRecv[name] {
-			if cand.PkgPath == pkg && cand.Name == fn.Name {
+		for _, cand := range m.Recv[recvKey(pkg, name)] {
+			if cand.Name == fn.Name {
 				return cand
 			}
 		}

@@ -82,10 +82,7 @@ func buildTypeCatalog(m *Module) map[string]JType {
 		case td.st != nil:
 			jt.K = "struct"
 			jt.Fields = structFields(td.st)
-			for _, f := range m.ByRecv[td.name] {
-				if f.PkgPath != td.pkg {
-					continue
-				}
+			for _, f := range m.Recv[recvKey(td.pkg, td.name)] {
 				jt.Methods = append(jt.Methods, JTypeMethod{N: f.Name, Key: f.Key, Sig: funcSig(f.Decl.Type), L: f.Start})
 			}
 		}

@@ -177,7 +177,7 @@ func (w *Walker) seed() {
 							w.routerFields[ts.Name.Name] = map[string]bool{}
 						}
 						w.routerFields[ts.Name.Name][n.Name] = true
-						for _, m := range w.m.ByRecv[ts.Name.Name] {
+						for _, m := range w.m.Recv[recvKey(fc.PkgPath, ts.Name.Name)] {
 							key := m.RecvVar + "." + n.Name
 							if _, set := w.states[m.Key][key]; !set {
 								w.setState(m, key, State{})
@@ -310,6 +310,7 @@ func (w *Walker) composite(f *Func, e ast.Expr, env map[string]State) {
 		}
 	}
 	typeName := strings.TrimPrefix(typeString(lit.Type), "*")
+	typePkg, _ := typeRef(f.File, typeString(lit.Type))
 	fields, ok := w.routerFields[typeName]
 	if !ok {
 		return
@@ -327,7 +328,7 @@ func (w *Walker) composite(f *Func, e ast.Expr, env map[string]State) {
 		if !ok {
 			continue
 		}
-		for _, m := range w.m.ByRecv[typeName] {
+		for _, m := range w.m.Recv[recvKey(typePkg, typeName)] {
 			w.setState(m, m.RecvVar+"."+field, st)
 		}
 	}
@@ -585,7 +586,8 @@ func (w *Walker) inlineBound(target *Func, ce *ast.CallExpr, caller *Func, calle
 func (w *Walker) streamEntry(f *Func, e ast.Expr) *Func {
 	if lit, ok := e.(*ast.CompositeLit); ok {
 		typ := strings.TrimPrefix(typeString(lit.Type), "*")
-		for _, m := range w.m.ByRecv[typ] {
+		pkg, _ := typeRef(f.File, typeString(lit.Type))
+		for _, m := range w.m.Recv[recvKey(pkg, typ)] {
 			if m.Name == "OnMessage" {
 				return m
 			}

@@ -34,6 +34,32 @@ go test $pkgs
 
 `make check` runs both halves, and `make build` builds the UI and then the binary.
 
+## Performance
+
+The loader reads and parses `.go` files concurrently, and methods are indexed by
+`pkgPath|receiver`, so a receiver lookup costs one map hit instead of a scan
+over every method in the module. `bench_test.go` generates its fixture (200
+handlers, five router groups, eight services) in a temp dir, so the numbers do
+not depend on this checkout.
+
+```bash
+go test . -run '^$' -bench . -benchtime=3x
+go test . -run '^$' -bench BenchmarkLoadModule -benchtime=200x -cpuprofile cpu.out
+go tool pprof -top cpu.out
+```
+
+On an Apple M3 (darwin/arm64), alternating `-benchtime=200x -count=3` runs,
+minimum of nine samples each:
+
+| benchmark | before | after |
+| --- | --- | --- |
+| `BenchmarkLoadModule` | 1.10 ms | 0.77 ms |
+| `BenchmarkBuildRoutes` | 1.08 ms | 1.11 ms |
+
+`BenchmarkBuildRoutes` is unchanged within noise: the 12-pass convergence loop
+still dominates route walking, and the fixture has too few receiver methods for
+the index to move it.
+
 ## What you see
 
 | level | what it shows |
@@ -76,9 +102,12 @@ could not see, and only prints that block when there is something to say:
   flows      3 truncated at depth/limit
 ```
 
-- **files** — every `.go` file that failed to read or parse, or that was skipped
-  as generated, is listed with its reason. The page omits those files entirely,
-  so a route declared there is invisible.
+- **files** — every `.go` file that failed to read or parse, that was skipped
+  as generated, or that is inactive for the current `GOOS`/`GOARCH` is listed
+  with its reason. Inactive files (`//go:build` lines and filename suffixes
+  such as `_windows.go`) are never parsed, so a route declared there cannot
+  appear as a phantom route on the page. The page omits all skipped files
+  entirely, so anything declared there is invisible by design.
 - **calls** — calls are counted per function and deduplicated by expression. A
   call counts as *in-module unresolved* only when it should have resolved here:
   a package path belongs to this module, or it is a bare identifier absent from
@@ -89,7 +118,7 @@ could not see, and only prints that block when there is something to say:
   report counts every flow skipped at the cap.
 
 The same counters and bounded lists are in the baked JSON under `diag`
-(`parsed`, `skipped`, `read`, `parse`, `generated`, `skip`, `calls`,
+(`parsed`, `skipped`, `read`, `parse`, `generated`, `build`, `skip`, `calls`,
 `resolved`, `unresolved`, `unres`, `truncated`).
 
 ## Limits
@@ -98,6 +127,7 @@ The same counters and bounded lists are in the baked JSON under `diag`
 - Flow depth stops at foreign packages. A call through an interface field resolves to its single concrete implementation (repository → store); an interface with several implementations stays unbound rather than guessed. Recursion stops at the breadcrumb trail.
 - Stream schemas stop at dynamic values (`any`, channels, values crossing an interface). Socket.IO rooms are not treated as plain WebSockets.
 - The service switcher is directory-based. A repo that wires every route from one central router, outside the entry point directories, keeps a single surface rather than a wrong split.
+- Build constraints use this machine's `GOOS`/`GOARCH` defaults, including `//go:build` lines and filename suffixes such as `_windows.go`. Files that do not match are skipped and listed with reason `build`, so a cross-compiled surface is not shown.
 - gRPC needs the generated `_grpc.pb.go` registration and `_ServiceDesc` inside `-root`. The implementation is found even when its factory returns the service interface. Modules referenced by `go.work` from outside `-root`, gRPC-gateway, and Connect-Go registrations are not resolved yet.
 
 ## Timing overlay (`-trace`)

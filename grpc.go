@@ -233,13 +233,10 @@ func (g *grpcIndex) methodsOf(typ string) map[string]*Func {
 	if typ == "" {
 		return out
 	}
-	for _, fn := range g.m.ByRecv[typ] {
-		out[fn.Name] = fn
-	}
-	for name, list := range g.m.Methods {
-		for _, fn := range list {
-			if strings.TrimPrefix(fn.Recv, "*") == typ {
-				out[name] = fn
+	for key, fns := range g.m.Recv {
+		if _, recv := splitRecvKey(key); recv == typ {
+			for _, fn := range fns {
+				out[fn.Name] = fn
 			}
 		}
 	}
@@ -262,7 +259,8 @@ func (g *grpcIndex) implByIface(sigs []ifaceMethod) string {
 		return ""
 	}
 	best, bestExtra := "", -1
-	for typ, fns := range g.m.ByRecv {
+	for key, fns := range g.m.Recv {
+		_, typ := splitRecvKey(key)
 		if strings.HasPrefix(typ, "Unimplemented") || generatedOnly(fns) {
 			continue
 		}
