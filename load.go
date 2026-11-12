@@ -127,8 +127,11 @@ type Module struct {
 	FuncTypes map[string]bool                // "pkg|Type" -> declared func type
 	FuncVars  map[string]map[string]bool     // pkgPath -> package var of func type
 	Vars      map[string]FieldRef            // "pkgPath|name" -> declared package var/const type
-	PkgDocs   map[string]string
-	Diag      Diag
+	// Wiring maps "pkg|Interface" to the set of "pkg|Type" the code visibly
+	// assigns to it. It is collected once after indexing and never mutated.
+	Wiring  map[string]map[string]bool
+	PkgDocs map[string]string
+	Diag    Diag
 }
 
 var skipDirs = map[string]bool{
@@ -155,6 +158,7 @@ func loadModule(root string) (*Module, error) {
 		FuncTypes: map[string]bool{},
 		FuncVars:  map[string]map[string]bool{},
 		Vars:      map[string]FieldRef{},
+		Wiring:    map[string]map[string]bool{},
 		PkgDocs:   map[string]string{},
 	}
 	modPath, modName := readGoMod(abs)
@@ -305,6 +309,11 @@ func loadModule(root string) (*Module, error) {
 			}
 		}
 	}
+
+	// Wiring evidence is read from the AST after every type, field, variable
+	// and package function is indexed, and before calls are resolved: ifaceImpl
+	// consults it, and it must be complete and immutable by then.
+	m.indexWiring()
 
 	for _, f := range m.Funcs {
 		f.Calls = m.callsOf(f)
