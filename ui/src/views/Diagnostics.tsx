@@ -30,14 +30,44 @@ export function DiagnosticsView() {
   const honestPct = honestBase > 0 ? (diag.resolved / honestBase) * 100 : 100
   const callReasons = (
     [
-      { k: 'resolved', n: diag.resolved, tone: 'info' },
-      { k: 'blind', n: diag.unresolved, tone: 'bad' },
-      { k: 'dynamic', n: diag.dyn ?? 0, tone: 'warn' },
-      { k: 'ambiguous', n: diag.amb ?? 0, tone: 'warn' },
-      { k: 'unknown', n: diag.unk ?? 0, tone: 'default' },
-      { k: 'external', n: diag.ext ?? 0, tone: 'default' },
-      { k: 'convert', n: diag.conv ?? 0, tone: 'default' },
-      { k: 'builtin', n: diag.why?.builtin ?? 0, tone: 'default' },
+      { k: 'resolved', n: diag.resolved, tone: 'info', hint: 'target is an in-module function' },
+      {
+        k: 'blind',
+        n: diag.unresolved,
+        tone: 'bad',
+        hint: 'in-module target the index should hold but does not',
+      },
+      {
+        k: 'dynamic',
+        n: diag.dyn ?? 0,
+        tone: 'warn',
+        hint: 'call through a function value, so there is no static target',
+      },
+      {
+        k: 'ambiguous',
+        n: diag.amb ?? 0,
+        tone: 'warn',
+        hint: 'interface value with more than one indexed implementation',
+      },
+      {
+        k: 'unknown',
+        n: diag.unk ?? 0,
+        tone: 'default',
+        hint: 'receiver type not provable (for example tx := db.Begin(); tx.Exec())',
+      },
+      {
+        k: 'external',
+        n: diag.ext ?? 0,
+        tone: 'default',
+        hint: 'target package is outside this module',
+      },
+      { k: 'convert', n: diag.conv ?? 0, tone: 'default', hint: 'type conversion, not a call' },
+      {
+        k: 'builtin',
+        n: diag.why?.builtin ?? 0,
+        tone: 'default',
+        hint: 'language builtin such as len',
+      },
     ] as const
   ).filter((r) => r.n > 0)
 
@@ -47,7 +77,7 @@ export function DiagnosticsView() {
         title="diagnostics"
         badge="diag"
         meta={`${diag.parsed} files parsed · ${diag.skipped} skipped · ${diag.resolved}/${diag.calls} calls resolved · ${honestPct.toFixed(1)}% honest · ${diag.truncated ?? 0} flows truncated`}
-        note={`${diag.unresolved} blind calls. External calls and conversions are not blind spots: their targets live outside this module or are type conversions, so they are counted separately.`}
+        note={`${diag.unresolved} blind ${diag.unresolved === 1 ? 'call' : 'calls'} — in-module targets the index should hold. External calls, conversions and builtins are not blind spots; unknown means the receiver type is not provable, so no target can be named.`}
       />
       <div className="grid gap-3 p-4 lg:grid-cols-2">
         <section className="border-line bg-panel/40 rounded-[6px] border">
@@ -97,15 +127,16 @@ export function DiagnosticsView() {
           </div>
           <div className="border-line/60 flex flex-wrap gap-1.5 border-b px-3 py-2">
             {callReasons.map((r) => (
-              <span key={r.k} className="flex items-center gap-1">
+              <span key={r.k} className="flex items-center gap-1" title={r.hint}>
                 <Badge variant={r.tone}>{r.k}</Badge>
                 <b className="text-ink text-[11px] font-semibold">{r.n}</b>
               </span>
             ))}
           </div>
           <div className="text-faint border-line/60 border-b px-3 py-1.5 text-[10px] leading-relaxed">
-            honest = resolved / (resolved + blind + dynamic + ambiguous + unknown). External calls
-            and conversions are not blind spots.
+            honest = resolved / (resolved + blind + dynamic + ambiguous + unknown). unknown means
+            the receiver type is not provable (for example <code>tx := db.Begin(); tx.Exec()</code>
+            ), not a blind in-module gap. External calls, conversions and builtins are excluded.
           </div>
           <div className="divide-line/60 divide-y">
             {unresolved.length === 0 && (
