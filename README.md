@@ -45,6 +45,74 @@ Go 1.26. `go.floor` records the supported floor (`1.26`) and
 so a future bump is a reviewed change instead of a silent Renovate side effect.
 CI runs the same check.
 
+## Use it on a PR
+
+The composite action builds synoptic, analyzes the target repo, diffs its routes
+against the pull request's base branch, uploads the four files as one artifact,
+and posts one sticky comment. Re-runs update that comment instead of adding
+another.
+
+```yaml
+name: synoptic
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the -base diff needs the base commit
+      - uses: Naputt1/synoptic@main
+        with:
+          root: .
+          comment: "true"
+```
+
+`root` is a subdirectory of the workspace, so a monorepo points at the service
+it wants to report on. `base` defaults to `origin/$GITHUB_BASE_REF` on a pull
+request (fetched by the action) and to `HEAD~1` otherwise; the chosen ref is
+printed in the step log.
+
+| input | default | meaning |
+| --- | --- | --- |
+| `root` | `.` | repository subdirectory to analyze |
+| `base` | empty | ref to diff against; empty picks the pull request base or `HEAD~1` |
+| `artifact-name` | `synoptic` | name of the uploaded artifact |
+| `comment` | `true` | post or update the sticky pull request comment |
+| `no-source` | `true` | pass `-no-source` so the page carries no raw source |
+
+| output | document |
+| --- | --- |
+| `html` | the self-contained page |
+| `json` | the raw data behind it |
+| `openapi` | the proven route surface as OpenAPI 3.1 |
+| `md` | the Markdown route report |
+
+All four are absolute paths under `$RUNNER_TEMP`; the artifact holds the same
+files, and the comment links to the workflow run that produced it.
+
+Caveats:
+
+- **It builds from source.** The action needs Go 1.26 and Bun, builds the UI and
+  the binary, and takes about a minute on a small repo. It is not a prebuilt
+  binary release yet.
+- **`-no-source` is on by default**, so the page and JSON keep docs, files and
+  line numbers but no raw handler bodies. Set `no-source: "false"` to embed
+  source, and treat the artifact as code.
+- **Fork pull requests get no comment.** Their token is read-only, so the action
+  skips the comment step; the artifact is still uploaded. Jobs on forks can set
+  `comment: "false"` explicitly.
+- **Comments need `pull-requests: write`** (or `issues: write`). With
+  `comment: "false"` the action needs `contents: read` only.
+- **`fetch-depth: 0` is the safe checkout**, or a depth deep enough to contain
+  the base commit. The base view is best-effort: an unavailable ref prints a
+  warning and the report keeps its file-touch data instead of failing.
+
 ## Corpus
 
 The corpus is a pinned set of real repositories the analyzer is measured
@@ -321,10 +389,10 @@ route table. With a change section the table sits inside
 footer repeats the blind-spot counts. There are no timestamps, so two runs over
 the same tree are byte-identical.
 
-**GitHub Action.** The Markdown is sized for a PR comment: run synoptic with
-`-base "$GITHUB_BASE_REF" -md routes.md`, then pass `routes.md` to the comment
-step. The OpenAPI file can be published as an artifact or diffed between
-revisions. Both work with `-html=false`, so the action needs no browser.
+**GitHub Action.** The Markdown is sized for a PR comment, and the OpenAPI file
+can be published as an artifact or diffed between revisions. Both work with
+`-html=false`, so a workflow needs no browser. See
+[Use it on a PR](#use-it-on-a-pr) for the ready-made action.
 
 ## Source redaction (`-no-source`)
 

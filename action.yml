@@ -1,0 +1,175 @@
+name: synoptic
+description: Render a repo's HTTP route surface, diff it against a base ref, and post the report on a pull request.
+author: Naputt1
+
+branding:
+  icon: map
+  color: blue
+
+inputs:
+  root:
+    description: Repository subdirectory to analyze, relative to the workspace.
+    required: false
+    default: "."
+  base:
+    description: Git ref to diff against. Empty uses origin/$GITHUB_BASE_REF on a pull request and HEAD~1 otherwise.
+    required: false
+    default: ""
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: synoptic
+  comment:
+    description: Post or update one sticky comment on the pull request. Needs pull-requests write.
+    required: false
+    default: "true"
+  no-source:
+    description: Omit raw source from the page, keeping docs, files and line numbers.
+    required: false
+    default: "true"
+
+outputs:
+  html:
+    description: Absolute path of the generated page.
+    value: ${{ steps.generate.outputs.html }}
+  json:
+    description: Absolute path of the raw data export.
+    value: ${{ steps.generate.outputs.json }}
+  openapi:
+    description: Absolute path of the OpenAPI 3.1 export.
+    value: ${{ steps.generate.outputs.openapi }}
+  md:
+    description: Absolute path of the Markdown route report.
+    value: ${{ steps.generate.outputs.md }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version-file: ${{ github.action_path }}/ui/package.json
+
+    - name: Install UI dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}/ui
+      run: bun install --frozen-lockfile
+
+    - name: Build UI
+      shell: bash
+      working-directory: ${{ github.action_path }}/ui
+      run: bun run build
+
+    - name: Build synoptic
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: go build -o "$RUNNER_TEMP/synoptic" .
+
+    - name: Resolve the base ref
+      id: base
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+      run: |
+        set -euo pipefail
+        base="$INPUT_BASE"
+        if [ -z "$base" ]; then
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            base="origin/$GITHUB_BASE_REF"
+            if ! git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=50 origin \
+                "+refs/heads/$GITHUB_BASE_REF:refs/remotes/origin/$GITHUB_BASE_REF"; then
+              echo "::warning::could not fetch $GITHUB_BASE_REF; using $base if it is already present"
+              if ! git -C "$GITHUB_WORKSPACE" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+                echo "::warning::$base is not available; falling back to HEAD~1"
+                base="HEAD~1"
+              fi
+            fi
+          else
+            base="HEAD~1"
+          fi
+        fi
+        echo "base ref: $base"
+        echo "base=$base" >> "$GITHUB_OUTPUT"
+
+    - name: Generate the report
+      id: generate
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_NO_SOURCE: ${{ inputs.no-source }}
+        BASE_REF: ${{ steps.base.outputs.base }}
+      run: |
+        set -euo pipefail
+        args=(
+          -root "$GITHUB_WORKSPACE/$INPUT_ROOT"
+          -base "$BASE_REF"
+          -out "$RUNNER_TEMP/synoptic.html"
+          -json "$RUNNER_TEMP/synoptic.json"
+          -openapi "$RUNNER_TEMP/openapi.json"
+          -md "$RUNNER_TEMP/synoptic.md"
+        )
+        if [ "$INPUT_NO_SOURCE" = "true" ]; then
+          args+=(-no-source)
+        fi
+        "$RUNNER_TEMP/synoptic" "${args[@]}"
+        {
+          echo "html=$RUNNER_TEMP/synoptic.html"
+          echo "json=$RUNNER_TEMP/synoptic.json"
+          echo "openapi=$RUNNER_TEMP/openapi.json"
+          echo "md=$RUNNER_TEMP/synoptic.md"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Upload the report
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ steps.generate.outputs.html }}
+          ${{ steps.generate.outputs.json }}
+          ${{ steps.generate.outputs.openapi }}
+          ${{ steps.generate.outputs.md }}
+        if-no-files-found: error
+        retention-days: 14
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request && github.event.pull_request.head.repo.full_name == github.repository
+      uses: actions/github-script@v7
+      env:
+        REPORT_MD: ${{ steps.generate.outputs.md }}
+      with:
+        script: |
+          const fs = require('node:fs');
+          const marker = '<!-- synoptic-report -->';
+          const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          const header = `${marker}\n[Download the synoptic artifact](${runUrl}) from this run.\n\n`;
+
+          let report = fs.readFileSync(process.env.REPORT_MD, 'utf8');
+          const limit = 60000;
+          if (header.length + report.length > limit) {
+            report = report.slice(0, limit - header.length - 120);
+            report = report.slice(0, report.lastIndexOf('\n') + 1);
+            report += '\n_Report truncated. Download the artifact for the full document._\n';
+          }
+          const body = header + report;
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+            per_page: 100,
+          });
+          const previous = comments.find((c) => c.body && c.body.includes(marker));
+          if (previous) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            core.info(`updated comment ${previous.id}`);
+          } else {
+            const created = await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            core.info(`created comment ${created.data.id}`);
+          }

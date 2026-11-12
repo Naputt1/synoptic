@@ -1,0 +1,52 @@
+name: action smoke
+
+on:
+  pull_request:
+    paths:
+      - action.yml
+      - .github/workflows/action-smoke.yml
+      - testdata/actionfixture/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: action smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the base diff needs the merge base
+
+      - name: Run the action
+        id: report
+        uses: ./
+        with:
+          root: testdata/actionfixture
+          comment: "false"
+          artifact-name: synoptic-smoke
+
+      - name: Check the outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() {
+            local name="$1" path="$2"
+            if [ -z "$path" ] || [ ! -s "$path" ]; then
+              echo "::error::$name output is empty: '$path'"
+              exit 1
+            fi
+            echo "$name: $path ($(wc -c < "$path") bytes)"
+          }
+          check html "${{ steps.report.outputs.html }}"
+          check json "${{ steps.report.outputs.json }}"
+          check openapi "${{ steps.report.outputs.openapi }}"
+          check md "${{ steps.report.outputs.md }}"
+          if ! grep -q '^3 routes' "${{ steps.report.outputs.md }}"; then
+            echo "::error::expected 3 routes in the Markdown report"
+            exit 1
+          fi
+          echo "--- markdown head ---"
+          head -n 20 "${{ steps.report.outputs.md }}"
