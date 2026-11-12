@@ -15,7 +15,8 @@ import (
 // branch does not light up every file it changed after the fork. The working
 // tree is added on top: a file with uncommitted edits is also "changed since
 // ref", and it lets -base HEAD describe what the user is editing right now.
-// Only names are read; the base tree is never analyzed.
+// Only names are read; the base tree is never analyzed here. The route diff in
+// diff.go materializes it separately when -base is set.
 func changedFiles(root, ref string) (map[string]bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
