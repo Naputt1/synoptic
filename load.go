@@ -1111,8 +1111,15 @@ func typeRef(file *FileCtx, typeText string) (string, string) {
 // method of the interface: the receiver an interface call reaches when there is
 // exactly one, as with a repository interface and its store. Methods may be
 // declared directly or promoted through embedding. Generated stubs are skipped.
-// More than one implementation is reported as ambiguous instead of guessed, so
-// the caller can say why the call has no target.
+//
+// When more than one implementation matches, the wiring index is the only tie
+// breaker: the call binds if exactly one concrete type is visibly assigned to
+// the interface anywhere in the module. Zero or several wired types leave the
+// call ambiguous instead of guessed. The rule is global on purpose: if two call
+// sites wire different implementations of the same interface, each site may look
+// clear on its own, but the module disagrees and neither is safe to choose.
+// Wiring never overrides a direct method or a field-typed resolution; it runs
+// only in this fallback.
 func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) (*Func, bool) {
 	ms, ok := m.Ifaces[pkgPath+"|"+name]
 	if !ok {
@@ -1135,11 +1142,39 @@ func (m *Module) ifaceImpl(pkgPath, name, sel string, self *Func) (*Func, bool) 
 			continue
 		}
 		if match != nil {
-			return nil, true // more than one implementation: do not guess
+			if fn := m.wiredImpl(pkgPath, name, sel, self); fn != nil {
+				return fn, false
+			}
+			return nil, true // several implementations and no unique wiring
 		}
 		match = fn
 	}
 	return match, false
+}
+
+// wiredImpl resolves an ambiguous interface through the wiring index. It returns
+// the one wired type's sel method only when the index names exactly one
+// implementation and that type still declares the method; otherwise nil.
+func (m *Module) wiredImpl(pkgPath, name, sel string, self *Func) *Func {
+	wired := m.Wiring[recvKey(pkgPath, name)]
+	if len(wired) != 1 {
+		return nil
+	}
+	var tn typeName
+	for key := range wired {
+		tn.pkg, tn.name = splitRecvKey(key)
+	}
+	if self != nil && tn.pkg == self.PkgPath && tn.name == self.Recv {
+		return nil // the receiver is not an implementation of its own field
+	}
+	fn, found, ambiguous := m.findMethod(tn.pkg, tn.name, sel)
+	if !found || ambiguous || fn == nil {
+		return nil
+	}
+	if generatedOnly(m.recvMethods(fn.PkgPath, fn.Recv)) {
+		return nil
+	}
+	return fn
 }
 
 // candidateTypes lists every type that could satisfy a non-empty interface: a
