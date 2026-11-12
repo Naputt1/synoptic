@@ -95,6 +95,7 @@ type JData struct {
 	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
 	Diag     Diag                    `json:"diag"`
 	Change   *JChange                `json:"change,omitempty"`
+	Redact   bool                    `json:"redact,omitempty"`
 }
 
 func buildData(m *Module, routes []*Route) JData {

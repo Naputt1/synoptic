@@ -23,6 +23,7 @@ func main() {
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
 	typed := flag.Bool("typed", false, "use the Go type checker to resolve calls the AST pass misses (slower; the repo must type-check)")
 	base := flag.String("base", "", "git ref to compare against: mark routes whose files changed since <ref> (best-effort)")
+	noSource := flag.Bool("no-source", false, "omit source code from the page, keeping docs, files and line numbers")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -70,6 +71,9 @@ func main() {
 			os.Exit(1)
 		}
 		d.Timing = tm
+	}
+	if *noSource {
+		redact(&d)
 	}
 	if *js != "" {
 		if err := writeJSON(*js, d); err != nil {
