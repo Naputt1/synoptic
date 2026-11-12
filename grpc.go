@@ -717,6 +717,7 @@ func attachServices(m *Module, d *JData, services []JService) {
 		d.Flows[key] = jf
 	}
 	d.Stats.Funcs = len(d.Flows)
+	d.Diag = m.Diag
 	pruneSvcs(d)
 }
 
