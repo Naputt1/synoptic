@@ -22,6 +22,7 @@ func main() {
 	html := flag.Bool("html", true, "write the html page")
 	trace := flag.String("trace", "", "span export to overlay timings on (flat json spans or OTLP json)")
 	typed := flag.Bool("typed", false, "use the Go type checker to resolve calls the AST pass misses (slower; the repo must type-check)")
+	base := flag.String("base", "", "git ref to compare against: mark routes whose files changed since <ref> (best-effort)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -52,6 +53,16 @@ func main() {
 	}
 	d := buildData(m, routes)
 	attachServices(m, &d, services)
+	if *base != "" {
+		changed, err := changedFiles(m.Root, *base)
+		if err != nil {
+			// The change view is a convenience: a missing git, a bad ref or a
+			// tree that is not a repo must not take the page down.
+			fmt.Fprintf(os.Stderr, "base: %v (no change data)\n", err)
+		} else {
+			markChanges(&d, changed, *base)
+		}
+	}
 	if *trace != "" {
 		tm, err := buildTiming(*trace, routes)
 		if err != nil {

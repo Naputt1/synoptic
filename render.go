@@ -21,6 +21,7 @@ type JStage struct {
 	Ext  string   `json:"x,omitempty"`
 	K    string   `json:"fk,omitempty"`
 	In   []JInput `json:"in,omitempty"`
+	Chg  bool     `json:"chg,omitempty"`
 }
 
 type JRoute struct {
@@ -33,6 +34,15 @@ type JRoute struct {
 	St    *JStream `json:"st,omitempty"`
 	Chain []JStage `json:"ch"`
 	Doc   *JDoc    `json:"doc,omitempty"`
+	Chg   bool     `json:"chg,omitempty"`
+}
+
+// JChange describes the -base view: the ref compared against, how many files it
+// touched, and how many routes have at least one changed file.
+type JChange struct {
+	Ref    string `json:"ref"`
+	Files  int    `json:"files"`
+	Routes int    `json:"routes"`
 }
 
 // JSvc is one entry point of a multi-service module, with what it owns.
@@ -84,6 +94,7 @@ type JData struct {
 	Types    map[string]JType        `json:"types,omitempty"`
 	Timing   map[string]JRouteTiming `json:"timing,omitempty"`
 	Diag     Diag                    `json:"diag"`
+	Change   *JChange                `json:"change,omitempty"`
 }
 
 func buildData(m *Module, routes []*Route) JData {
