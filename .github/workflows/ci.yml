@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # No go.sum: the module has no dependencies, so there is nothing to cache.
+          cache: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ui/package.json
+      - name: Install UI dependencies
+        working-directory: ui
+        run: bun install --frozen-lockfile
+      - name: Build UI
+        working-directory: ui
+        run: bun run build
+      - name: Check embedded UI exists
+        run: |
+          if [ ! -s ui/dist/index.html ]; then
+            echo "ui/dist/index.html is missing; go build would embed an empty page" >&2
+            exit 1
+          fi
+      - name: Build
+        run: go build ./...
+      - name: Vet and test
+        run: |
+          pkgs=$(go list ./... | grep -v '/node_modules/')
+          go vet $pkgs
+          go test $pkgs
+
+  ui:
+    name: ui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ui/package.json
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Lint
+        run: bun run lint
