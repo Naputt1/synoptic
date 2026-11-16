@@ -434,8 +434,10 @@ The comparison is part of the URL, so a review is shareable and reloads itself:
 `-addr <host:port>` moves the listener; only loopback addresses are accepted,
 and there is no authentication, so do not bind it to a network interface.
 `-no-source` still applies: patches are stripped and the panel says source is
-unavailable. Static exports and the GitHub Action are unchanged; without a
-server the changes page stays read-only and shows the data baked into the page.
+unavailable. A `-serve` run starts on the working tree and ignores
+`-base`/`-to`/`-pr`; choose the comparison in the page, or open a deep link.
+Static exports and the GitHub Action are unchanged; without a server the changes
+page stays read-only and shows the data baked into the page.
 
 ## Exports (`-openapi`, `-md`)
 
