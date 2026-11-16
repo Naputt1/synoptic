@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ScopeCard } from '@/components/ScopeCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { AppLink } from '@/components/ui/link'
 import { Segmented } from '@/components/ui/segmented'
 import { comparePR, compareRefs, fetchRefs } from '@/lib/api'
@@ -24,9 +25,6 @@ type DiffLine = {
   oldNo: number | null
   newNo: number | null
 }
-
-const fieldClass =
-  'border-line bg-canvas text-ink placeholder:text-faint focus:border-line2 h-6 w-[180px] rounded-[4px] border px-2 text-[11px] outline-none disabled:cursor-not-allowed disabled:opacity-40 sm:w-[210px]'
 
 const metaPrefixes = [
   'diff --git',
@@ -350,20 +348,31 @@ export function ChangesView() {
     }
   }, [])
 
-  const refOptions = useMemo(() => {
-    const out: { value: string; label: string }[] = []
+  const refOptions = useMemo<ComboboxOption[]>(() => {
+    const out: ComboboxOption[] = []
     const seen = new Set<string>()
-    const add = (value: string | undefined, label: string) => {
+    const add = (value: string | undefined, label: string, kind: string, detail?: string) => {
       if (!value || seen.has(value)) return
       seen.add(value)
-      out.push({ value, label })
+      out.push({ value, label, kind, detail })
     }
-    add(refs?.current, 'current branch')
-    for (const b of refs?.branches ?? []) add(b, 'branch')
-    for (const t of refs?.tags ?? []) add(t, 'tag')
-    for (const c of refs?.commits ?? []) add(c.sha, `${refLabel(c.sha)} ${c.subject}`)
+    if (refs?.current) add(refs.current, refs.current, 'branch')
+    for (const b of refs?.branches ?? []) add(b, b, 'branch')
+    for (const t of refs?.tags ?? []) add(t, t, 'tag')
+    for (const c of refs?.commits ?? []) add(c.sha, c.subject, 'commit', refLabel(c.sha))
     return out
   }, [refs])
+
+  const prOptions = useMemo<ComboboxOption[]>(
+    () =>
+      (refs?.prs ?? []).map((p) => ({
+        value: String(p.number),
+        label: p.title,
+        kind: 'pr',
+        detail: `#${p.number}`,
+      })),
+    [refs],
+  )
 
   const routeIndex = useMemo(() => {
     const map = new Map<string, number>()
@@ -517,33 +526,31 @@ export function ChangesView() {
                 <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">
                   base <span className="text-bad">*</span>
                 </span>
-                <input
-                  list="synoptic-refs"
+                <Combobox
                   value={base}
-                  onChange={(e) => setBase(e.target.value)}
+                  onValueChange={setBase}
                   onKeyDown={onEnter}
+                  options={refOptions}
                   disabled={!refsReady || loading}
                   placeholder="branch, tag or sha"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className={fieldClass}
-                  aria-label="base ref"
+                  ariaLabel="base ref"
+                  empty="no matching ref; you can still type one"
+                  className="w-[180px] sm:w-[210px]"
                 />
               </label>
               <span className="text-faint pb-1 text-[11px]">→</span>
               <label className="flex items-center gap-1.5">
                 <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">head</span>
-                <input
-                  list="synoptic-refs"
+                <Combobox
                   value={head}
-                  onChange={(e) => setHead(e.target.value)}
+                  onValueChange={setHead}
                   onKeyDown={onEnter}
+                  options={refOptions}
                   disabled={!refsReady || loading}
                   placeholder="working tree (leave empty)"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className={fieldClass}
-                  aria-label="head ref; empty compares the working tree"
+                  ariaLabel="head ref; empty compares the working tree"
+                  empty="no matching ref; you can still type one"
+                  className="w-[180px] sm:w-[210px]"
                 />
               </label>
               {head !== '' && (
@@ -564,17 +571,16 @@ export function ChangesView() {
               <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">
                 pull request
               </span>
-              <input
-                list="synoptic-prs"
+              <Combobox
                 value={pr}
-                onChange={(e) => setPr(e.target.value)}
+                onValueChange={setPr}
                 onKeyDown={onEnter}
+                options={prOptions}
                 disabled={!refsReady || loading}
                 placeholder="number or URL"
-                autoComplete="off"
-                spellCheck={false}
-                className={`${fieldClass} w-[200px] sm:w-[260px]`}
-                aria-label="pull request number or URL"
+                ariaLabel="pull request number or URL"
+                empty="no matching pull request; you can still type a number or URL"
+                className="w-[200px] sm:w-[260px]"
               />
             </label>
           )}
@@ -593,16 +599,6 @@ export function ChangesView() {
               reading the comparison…
             </span>
           )}
-          <datalist id="synoptic-refs">
-            {refOptions.map((o) => (
-              <option key={o.value} value={o.value} label={o.label} />
-            ))}
-          </datalist>
-          <datalist id="synoptic-prs">
-            {(refs?.prs ?? []).map((p) => (
-              <option key={p.number} value={String(p.number)} label={`#${p.number} ${p.title}`} />
-            ))}
-          </datalist>
         </div>
         <div className="text-faint flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pb-1.5 text-[10px]">
           {refs?.current && (
