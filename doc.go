@@ -35,7 +35,7 @@ type JDoc struct {
 	Resp     []JResp  `json:"resp,omitempty"`
 	Auth     bool     `json:"auth,omitempty"`
 	AuthWhy  string   `json:"aw,omitempty"`
-	Tables   []string `json:"tables,omitempty"`
+	Queries  []JQuery `json:"queries,omitempty"`
 	Owner    string   `json:"owner,omitempty"`
 	Commit   string   `json:"commit,omitempty"`
 	Age      string   `json:"age,omitempty"`
@@ -43,8 +43,6 @@ type JDoc struct {
 }
 
 var (
-	tableRe   = regexp.MustCompile(`Table\("([^"]+)"\)`)
-	modelRe   = regexp.MustCompile(`Model\(&?([A-Za-z_][\w.]*)\{`)
 	jsonKeyRe = regexp.MustCompile(`"([A-Za-z_][\w]*)"\s*:`)
 )
 
@@ -149,7 +147,7 @@ func buildDoc(m *Module, r *Route) *JDoc {
 		}
 	}
 
-	d.Tables = tablesOf(m, h)
+	d.Queries = queriesOf(m, h)
 	if meta := gitMeta(m.Root, h.File.Rel); meta != nil {
 		d.Owner, d.Commit, d.Age = meta[0], meta[1], meta[2]
 	}
@@ -158,7 +156,7 @@ func buildDoc(m *Module, r *Route) *JDoc {
 }
 
 func callName(ce *ast.CallExpr) string {
-	switch f := ce.Fun.(type) {
+	switch f := unindex(ce.Fun).(type) {
 	case *ast.SelectorExpr:
 		return f.Sel.Name
 	case *ast.Ident:
@@ -288,43 +286,63 @@ func respKeys(text string) []string {
 	return keys
 }
 
-// tablesOf reads literal table names and model types in the handler, plus one
-// hop into the in-repo functions it calls.
-func tablesOf(m *Module, h *Func) []string {
+// queriesOf reads the database operations and target tables in the handler,
+// plus one hop into the in-repo functions it calls.
+func queriesOf(m *Module, h *Func) []JQuery {
 	seen := map[string]bool{}
-	var out []string
+	var out []JQuery
 	take := func(f *Func) {
-		if f == nil || f.File == nil || f.Start == 0 || f.End == 0 {
+		if f == nil || f.Decl == nil || f.Decl.Body == nil {
 			return
 		}
-		lines := f.File.Lines
-		lo, hi := f.Start-1, f.End
-		if lo < 0 {
-			lo = 0
-		}
-		if hi > len(lines) {
-			hi = len(lines)
-		}
-		src := strings.Join(lines[lo:hi], "\n")
-		for _, mm := range tableRe.FindAllStringSubmatch(src, 8) {
-			if !seen[mm[1]] {
-				seen[mm[1]] = true
-				out = append(out, mm[1])
+		ast.Inspect(f.Decl.Body, func(n ast.Node) bool {
+			ce, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
 			}
-		}
-		for _, mm := range modelRe.FindAllStringSubmatch(src, 8) {
-			name := strings.TrimPrefix(mm[1], "model.")
-			if !seen[name] {
-				seen[name] = true
-				out = append(out, name)
+			c, ok := describeCall(ce)
+			if !ok {
+				return true
 			}
-		}
+			q, ok := dbQueryOf(m, f, ce, c)
+			if !ok {
+				return true
+			}
+			key := q.Op + "|" + q.Tb
+			if seen[key] {
+				return true
+			}
+			seen[key] = true
+			out = append(out, q)
+			return true
+		})
 	}
 	take(h)
 	for _, ref := range tableCalls(h) {
 		take(ref)
 	}
-	sort.Strings(out)
+	// A chain visits Table(...) as its own call before the terminal method.
+	// Keep the operation entry and drop the bare table it introduced.
+	withOp := map[string]bool{}
+	for _, q := range out {
+		if q.Op != "" {
+			withOp[q.Tb] = true
+		}
+	}
+	kept := out[:0]
+	for _, q := range out {
+		if q.Op == "" && q.Tb != "" && withOp[q.Tb] {
+			continue
+		}
+		kept = append(kept, q)
+	}
+	out = kept
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Tb != out[j].Tb {
+			return out[i].Tb < out[j].Tb
+		}
+		return out[i].Op < out[j].Op
+	})
 	if len(out) > 8 {
 		out = out[:8]
 	}

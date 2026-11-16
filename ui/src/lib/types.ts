@@ -49,6 +49,8 @@ export type StreamExt = {
   f?: string
   l?: number
   ev?: string
+  op?: string
+  tb?: string
 }
 export type EventOrigin = {
   n: string
@@ -75,6 +77,8 @@ export type Effect = {
   n: string
   b?: string
   s?: string
+  op?: string
+  tb?: string
   l?: number
   fk?: string
   c?: number
@@ -112,6 +116,12 @@ export type Input = {
   e?: string
 }
 
+/** A proven database operation and the table it targets. */
+export type Query = {
+  op?: string
+  tb?: string
+}
+
 export type Doc = {
   path?: DocField[]
   query?: DocField[]
@@ -121,7 +131,7 @@ export type Doc = {
   resp?: DocResp[]
   auth?: boolean
   aw?: string
-  tables?: string[]
+  queries?: Query[]
   owner?: string
   commit?: string
   age?: string

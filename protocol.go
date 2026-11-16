@@ -42,6 +42,8 @@ type JExt struct {
 	F  string `json:"f,omitempty"`
 	L  int    `json:"l,omitempty"`
 	Ev string `json:"ev,omitempty"` // event whose handler made the call
+	Op string `json:"op,omitempty"` // SQL verb, e.g. select
+	Tb string `json:"tb,omitempty"` // target table, e.g. users
 }
 
 type JStream struct {
@@ -664,7 +666,15 @@ func (p *protocolScan) call(scope *protoScope, ce *ast.CallExpr, depth int) {
 		if t := p.target(scope, ce); t != nil {
 			fk = t.Key
 		}
-		p.addExt(g, exprText(ce), fn.File, line(ce.Pos()), fk)
+		q := JQuery{}
+		if g == "db" {
+			if d, ok := describeCall(ce); ok {
+				if got, ok := dbQueryOf(p.idx.m, fn, ce, d); ok {
+					q = got
+				}
+			}
+		}
+		p.addExt(g, exprText(ce), fn.File, line(ce.Pos()), fk, q)
 	}
 	p.stringEvidence(scope, ce, sel)
 
@@ -833,7 +843,7 @@ func (p *protocolScan) addMsg(dir, name, typ string, fields []JField, expr, exam
 	*target = append(*target, m)
 }
 
-func (p *protocolScan) addExt(g, name string, f *FileCtx, l int, fk string) {
+func (p *protocolScan) addExt(g, name string, f *FileCtx, l int, fk string, q JQuery) {
 	name = strings.TrimSpace(name)
 	if name == "" || len(name) > 120 {
 		return
@@ -842,15 +852,22 @@ func (p *protocolScan) addExt(g, name string, f *FileCtx, l int, fk string) {
 	if f != nil {
 		rel = f.Rel
 	}
-	for _, x := range p.ext {
+	for i := range p.ext {
+		x := &p.ext[i]
 		if x.G == g && x.N == name && x.F == rel && x.L == l && x.Ev == p.event {
+			if x.Op == "" {
+				x.Op = q.Op
+			}
+			if x.Tb == "" {
+				x.Tb = q.Tb
+			}
 			return
 		}
 	}
 	if len(p.ext) >= 60 {
 		return
 	}
-	p.ext = append(p.ext, JExt{G: g, N: name, Fk: fk, F: rel, L: l, Ev: p.event})
+	p.ext = append(p.ext, JExt{G: g, N: name, Fk: fk, F: rel, L: l, Ev: p.event, Op: q.Op, Tb: q.Tb})
 }
 
 func protocolTag(fn *Func, ce *ast.CallExpr) string {

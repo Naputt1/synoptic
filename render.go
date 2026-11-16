@@ -294,7 +294,7 @@ func indexFunc(m *Module, flows map[string]JFunc, fn *Func, depth int) {
 		Src:   snippet(fn, 120),
 		Steps: buildFlow(fn),
 		In:    analyzeStageInputs(m, fn, ""),
-		Fx:    buildEffects(fn),
+		Fx:    buildEffects(m, fn),
 	}
 	// At the depth cap a flow with callees is cut short; say so rather than
 	// ending the trail as if the function had nothing left to show.

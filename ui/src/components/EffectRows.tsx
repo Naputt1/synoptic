@@ -11,16 +11,28 @@ export function EffectRows({ items, onFn }: { items: Effect[]; onFn?: (key: stri
             {x.k}
           </Badge>
           <div className="min-w-0 flex-1">
-            {x.fk && onFn ? (
-              <AppLink
-                href={onFn(x.fk)}
-                className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
-              >
-                {x.n}
-              </AppLink>
-            ) : (
-              <code className="text-ink font-mono text-[10.5px] break-words">{x.n}</code>
-            )}
+            <div className="flex flex-wrap items-baseline gap-1.5">
+              {x.fk && onFn ? (
+                <AppLink
+                  href={onFn(x.fk)}
+                  className="text-acc text-left font-mono text-[10.5px] break-words hover:underline"
+                >
+                  {x.n}
+                </AppLink>
+              ) : (
+                <code className="text-ink font-mono text-[10.5px] break-words">{x.n}</code>
+              )}
+              {x.op ? (
+                <span className="border-warn/35 text-warn rounded-[3px] border px-1 font-mono text-[9px] tracking-[0.08em]">
+                  {x.op.toUpperCase()}
+                </span>
+              ) : null}
+              {x.tb ? (
+                <span className="border-warn/35 text-warn rounded-[3px] border px-1 font-mono text-[9.5px]">
+                  {x.tb}
+                </span>
+              ) : null}
+            </div>
             {x.s && x.s !== x.n ? (
               <div className="text-faint font-mono text-[9px] break-words">{x.s}</div>
             ) : null}

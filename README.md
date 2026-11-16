@@ -519,7 +519,7 @@ Every route page carries a documentation band under the map, built from the sour
 | body | the struct behind `ShouldBindJSON` / `BodyParser` / `Decode`, with `json` names and `required` markers |
 | responses | status codes and literal `gin.H{}` / `fiber.Map{}` keys per exit; net/http `WriteHeader` / `http.Error` and project helpers such as `utils.SendJSONResponse` count too, by signature or by the writer call inside them |
 | auth | a middleware in the chain whose name looks like auth, jwt, session, token or guard (labelled as inferred) |
-| data touched | `Table("…")` and `Model(&X{})` in the handler and its direct callees |
+| data touched | the DB operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) and target table proven from a SQL literal, constant, or single-assignment local variable, or from a `Table("…")` / `Model(&X{})` chain, in the handler and its direct callees |
 | owner | `git log -1` for the file: author, short sha, age |
 | stream | the upgrade or `text/event-stream` proof, event names, and resolved frame shapes |
 | example | a `curl`, `wscat -c …` for WS, or `curl -N …` for SSE, with the bearer header when auth is proven |
@@ -536,7 +536,7 @@ Streaming routes stay in the HTTP map and keep their method, but carry a `WS` or
 - Frames also come from `WriteMsgpack` / `ReadMsgpack` and generic `Unmarshal*` helpers, so encoders such as msgpack stay visible.
 - When a handler dispatches on `switch msg.Type`, each case is followed to its handler function; the case constant becomes a received event and the handler's writes become sent frames with their resolved payloads.
 - A WS route opens on the **events** view: a searchable event list on the left, then one selected event on the right. The inspector shows the client frame, the concrete case handler, a compact **processing** trace with branches, every reply the case emits (`query`, `ping`, `auth` with `auth_ok` / `auth_invalid`), and the side effects that follow. `preamble` and `unmapped sends` stay pinned as separate entries instead of mixing into the event list.
-- **after effects** lists the reads, writes, and publishes in the selected handler. **deeper calls** keeps the database, cache, and outbound calls reached through helpers, without repeating the direct effects.
+- **after effects** lists the reads, writes, and publishes in the selected handler. A database entry carries the SQL operation (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) and its target table when the source proves them. **deeper calls** keeps the database, cache, and outbound calls reached through helpers, without repeating the direct effects.
 - Server-pushed events get a **triggered by** section. It follows `NewEvent`, `SSEvent`, and common publish/broadcast wrappers to the worker or route that produced the event, with `file:line` and call count. A client-triggered WS event has no such section because its client frame already shows the origin.
 - Calls that cannot be tied to one event stay in a collapsed route-wide group.
 - An SSE route uses the same list; because its events usually share one payload, the inspector shows that payload once and says it is sent for every event.

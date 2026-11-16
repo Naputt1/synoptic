@@ -249,19 +249,20 @@ export function DocPanel({ r }: { r: Route }) {
       {d && !s && (
         <div className="border-line/60 bg-line/40 grid grid-cols-1 gap-px border-t lg:grid-cols-[1fr_1.4fr]">
           <Cell label="data touched">
-            {d.tables?.length ? (
+            {d.queries?.length ? (
               <div className="flex flex-wrap gap-1.5">
-                {d.tables.map((t) => (
+                {d.queries.map((q, i) => (
                   <span
-                    key={t}
+                    key={`${q.op ?? ''}:${q.tb ?? ''}:${i}`}
                     className="border-warn/35 text-warn rounded-[3px] border px-1.5 py-px font-mono text-[10.5px]"
                   >
-                    {t}
+                    {q.op ? <span className="text-warn/75 mr-1">{q.op.toUpperCase()}</span> : null}
+                    {q.tb}
                   </span>
                 ))}
               </div>
             ) : (
-              <span className="text-faint">no literal table or model read</span>
+              <span className="text-faint">no SQL statement or table read</span>
             )}
           </Cell>
           <Cell label="example">

@@ -14,12 +14,14 @@ type JEffect struct {
 	N  string `json:"n"` // call name, e.g. db.Save
 	B  string `json:"b,omitempty"`
 	S  string `json:"s,omitempty"`
+	Op string `json:"op,omitempty"` // SQL verb, e.g. select
+	Tb string `json:"tb,omitempty"` // target table, e.g. users
 	L  int    `json:"l,omitempty"`
 	Fk string `json:"fk,omitempty"`
 	C  int    `json:"c,omitempty"`
 }
 
-func buildEffects(fn *Func) []JEffect {
+func buildEffects(m *Module, fn *Func) []JEffect {
 	if fn == nil {
 		return nil
 	}
@@ -76,6 +78,11 @@ func buildEffects(fn *Func) []JEffect {
 		if d.Target != nil {
 			e.Fk = d.Target.Key
 		}
+		if k != "publish" {
+			if q, ok := dbQueryOf(m, fn, ce, d); ok {
+				e.Op, e.Tb = q.Op, q.Tb
+			}
+		}
 		seen[key] = len(out)
 		out = append(out, e)
 		return true
@@ -110,12 +117,15 @@ func effectKind(c Call) (string, string) {
 		return "publish", "event"
 	}
 	switch sel {
-	case "create", "save", "update", "updates", "delete", "insert", "exec", "put", "set",
+	case "create", "save", "update", "updates", "delete", "insert", "exec", "execcontext",
+		"namedexec", "mustexec", "put", "set",
 		"add", "incr", "incrby", "del", "remove", "push", "publish", "write", "writemsg",
 		"writemsgpack", "writejson", "writemessage", "writestring", "send", "sendto", "commit":
 		return "write", effectGroup(c)
-	case "get", "find", "first", "last", "take", "scan", "count", "exists", "load",
-		"query", "select", "raw", "fetch", "read", "readmessage", "readjson", "search":
+	case "get", "getcontext", "find", "first", "last", "take", "scan", "count", "exists", "load",
+		"query", "queryx", "queryrow", "queryrowx", "querycontext", "queryrowcontext",
+		"select", "selectcontext", "namedquery", "raw", "fetch", "read", "readmessage",
+		"readjson", "search":
 		return "read", effectGroup(c)
 	}
 	// A few clients name the store only in the receiver, with a neutral verb.
