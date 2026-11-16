@@ -12,12 +12,13 @@ import (
 	"time"
 )
 
-// baseTimeout bounds the git work behind -base. A huge repository can take a
-// moment to check out; the whole view is optional, so it must not hang a run.
+// baseTimeout bounds the git work behind a comparison. A huge repository can
+// take a moment to check out; the whole view is optional, so it must not hang a
+// run.
 const baseTimeout = 60 * time.Second
 
 // materializeRef checks ref out into a detached temporary worktree and returns
-// the tree to analyze for the base side of the diff.
+// the tree to analyze for one side of the comparison.
 //
 // root may be a subdirectory of the repository; the returned baseRoot is the
 // matching subdirectory inside the worktree, so the same relative paths and
@@ -70,7 +71,7 @@ func materializeRef(root, ref string) (baseRoot string, cleanup func(), err erro
 	}
 	if _, err := os.Stat(filepath.Join(baseRoot, "go.mod")); err != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("base %s has no go.mod under %s", ref, rel)
+		return "", nil, fmt.Errorf("ref %s has no go.mod under %s", ref, rel)
 	}
 	return baseRoot, cleanup, nil
 }
@@ -238,19 +239,25 @@ func analyzeRoot(root string) (JData, error) {
 	return d, nil
 }
 
-// applyBaseView adds the -base view to d. It marks file-touch changes first,
-// then, when the base tree can be materialized and analyzed, replaces the
-// counters with a real route diff. Every failure is a warning: the current
-// tree still describes itself, so the run continues with the file view.
-func applyBaseView(d *JData, root, ref string, warn io.Writer) {
-	changed, err := changedFiles(root, ref)
+// applyCompareView adds the -base, -to or -pr view to d. It marks file-touch
+// changes and records the commit/file metadata first, then, when the base tree
+// can be materialized and analyzed, replaces the counters with a real route
+// diff. Every failure is a warning: the current tree still describes itself, so
+// the run continues with the file view.
+func applyCompareView(d *JData, root string, spec compareSpec, warn io.Writer) {
+	changed, files, filesMore, err := changedFilesFor(root, spec)
 	if err != nil {
-		fmt.Fprintf(warn, "base: %v (no change data)\n", err)
-		return
+		fmt.Fprintf(warn, "base: %v (no file change data)\n", err)
+		changed, files, filesMore = map[string]bool{}, nil, 0
 	}
-	markChanges(d, changed, ref)
+	commits, commitsMore, err := compareCommits(root, spec)
+	if err != nil {
+		fmt.Fprintf(warn, "base: commits: %v\n", err)
+		commits, commitsMore = nil, 0
+	}
+	markChanges(d, changed, spec, files, filesMore, commits, commitsMore)
 
-	baseRoot, cleanup, err := materializeRef(root, ref)
+	baseRoot, cleanup, err := materializeRef(root, spec.Base)
 	if err != nil {
 		fmt.Fprintf(warn, "base: %v (file view only)\n", err)
 		return

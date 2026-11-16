@@ -330,6 +330,41 @@ func TestMarkdownChanges(t *testing.T) {
 	}
 }
 
+func TestMarkdownRange(t *testing.T) {
+	d := markdownFixture()
+	d.Change.Mode = "range"
+	d.Change.To = "v2"
+	d.Change.Commits = []JCommit{{
+		Sha: "abcdef1234", Author: "test", Date: "2026-11-16T12:00:00Z", Subject: "add /new",
+	}}
+	d.Change.FileList = []JFileChange{{Path: "main.go", Status: "M"}}
+
+	md := string(buildMarkdown(d))
+	for _, want := range []string{
+		"## Changes main..v2",
+		"1 added · 1 removed · 1 modified · 3 files touched · 1 commit",
+		"<details><summary>Commits (1)</summary>",
+		"- `abcdef1` add /new — test, 2026-11-16",
+		"<details><summary>Changed files (1)</summary>",
+		"- `M` main.go",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown is missing %q\n%s", want, md)
+		}
+	}
+}
+
+func TestMarkdownPR(t *testing.T) {
+	d := markdownFixture()
+	d.Change.Mode = "pr"
+	d.Change.PR = 42
+	d.Change.To = "abcdef1234"
+	md := string(buildMarkdown(d))
+	if !strings.Contains(md, "## Changes PR #42 (main..abcdef1)") {
+		t.Errorf("PR heading is missing:\n%s", md)
+	}
+}
+
 func TestMarkdownWithoutChange(t *testing.T) {
 	d := markdownFixture()
 	d.Change = nil

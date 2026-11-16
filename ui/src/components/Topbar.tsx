@@ -5,6 +5,7 @@ import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { AppLink } from '@/components/ui/link'
 import { Segmented } from '@/components/ui/segmented'
+import { changeCounts } from '@/lib/change'
 import { useData, useSvc, useSvcSwitch } from '@/lib/context'
 import { routeHref, stageHref } from '@/lib/data'
 import { goto } from '@/lib/nav'
@@ -47,6 +48,8 @@ export function Topbar({ onSearch }: { onSearch: () => void }) {
           : 'router'
   const ri = parts[0] === 'r' ? Number(parts[1]) : -1
   const blind = (data.diag?.skipped ?? 0) + (data.diag?.unresolved ?? 0)
+  const change = data.change ? changeCounts(data.change) : null
+  const changeTotal = change ? change.added + change.removed + change.modified : 0
   const go = (lv: string) => {
     if (lv === 'router') goto('/')
     else if (lv === 'route' && ri >= 0) goto(routeHref(ri))
@@ -136,6 +139,15 @@ export function Topbar({ onSearch }: { onSearch: () => void }) {
               ]}
             />
           </div>
+        )}
+        {change && (
+          <AppLink
+            href="/changes"
+            className="border-line text-faint hover:border-acc/45 hover:text-ink flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] transition-colors"
+            title="routes, commits and files in this comparison"
+          >
+            <b className="text-acc font-semibold">{changeTotal}</b> changes
+          </AppLink>
         )}
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search

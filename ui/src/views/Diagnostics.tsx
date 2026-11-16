@@ -1,6 +1,7 @@
 import { ScopeCard } from '@/components/ScopeCard'
 import { Badge } from '@/components/ui/badge'
 import { AppLink } from '@/components/ui/link'
+import { changeTitle } from '@/lib/change'
 import { useData } from '@/lib/context'
 import { fnHref } from '@/lib/data'
 
@@ -73,7 +74,7 @@ export function DiagnosticsView() {
 
   const change = data.change
   const changeMeta = change
-    ? ` · vs ${change.ref}: ${change.added?.length ?? 0} added · ${change.removed?.length ?? 0} removed · ${change.modified?.length ?? 0} changed`
+    ? ` · ${changeTitle(change)}: ${change.added?.length ?? 0} added · ${change.removed?.length ?? 0} removed · ${change.modified?.length ?? 0} changed`
     : ''
 
   return (

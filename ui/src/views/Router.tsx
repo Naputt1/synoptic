@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { AppLink } from '@/components/ui/link'
 import { Segmented } from '@/components/ui/segmented'
 import { buildRouterScene } from '@/graph/scenes'
+import { changeTitle, headLabel } from '@/lib/change'
 import { useData, useSvc } from '@/lib/context'
 
 export function RouterView() {
@@ -26,7 +27,7 @@ export function RouterView() {
   const count = shown.length
   const changed = shown.filter((r) => r.chg).length
   const changeMeta =
-    data.change && changed > 0 ? ` · ${changed} changed since ${data.change.ref}` : ''
+    data.change && changed > 0 ? ` · ${changed} changed ${changeTitle(data.change)}` : ''
   const change = data.change
   const removed = change?.removed ?? []
   const modified = change?.modified ?? []
@@ -47,15 +48,33 @@ export function RouterView() {
           {change && (
             <div className="border-line bg-panel/20 border-b px-4 py-1.5 text-[10.5px]">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">base</span>
-                <span className="text-mut">vs</span>
-                <code className="text-ink">{change.ref}</code>
+                <span className="text-faint text-[9.5px] tracking-[0.14em] uppercase">
+                  {change.mode === 'range' ? 'range' : change.mode === 'pr' ? 'pr' : 'base'}
+                </span>
+                {change.to ? (
+                  <>
+                    <code className="text-ink">{change.ref}</code>
+                    <span className="text-mut">→</span>
+                    <code className="text-ink">{headLabel(change)}</code>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-mut">vs</span>
+                    <code className="text-ink">{change.ref}</code>
+                  </>
+                )}
                 <span className="text-mut">:</span>
                 <span className="text-acc font-semibold">{change.added?.length ?? 0} added</span>
                 <span className="text-faint">·</span>
                 <span className="text-bad font-semibold">{removed.length} removed</span>
                 <span className="text-faint">·</span>
                 <span className="text-warn font-semibold">{modified.length} changed</span>
+                <AppLink
+                  href="/changes"
+                  className="text-acc ml-auto shrink-0 text-[10px] hover:underline"
+                >
+                  all changes ›
+                </AppLink>
               </div>
               {(removed.length > 0 || modified.length > 0) && (
                 <details className="mt-1">

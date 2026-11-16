@@ -54,15 +54,68 @@ type JRouteMod struct {
 	Why []string `json:"why"`
 }
 
-// JChange describes the -base view: the ref compared against, how many files it
+// JCommit is one commit on the head side of a comparison.
+type JCommit struct {
+	Sha     string `json:"sha"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Subject string `json:"subject"`
+}
+
+// JFileChange is one changed .go file and its git status letter (M, A, D, R).
+type JFileChange struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
+// JChange describes a comparison: the two sides, how many files and commits it
 // touched, and how the route set itself differs (added, removed, modified).
 type JChange struct {
-	Ref      string      `json:"ref"`
-	Files    int         `json:"files"`
-	Routes   int         `json:"routes"`
-	Added    []JRouteKey `json:"added,omitempty"`
-	Removed  []JRouteKey `json:"removed,omitempty"`
-	Modified []JRouteMod `json:"modified,omitempty"`
+	Ref         string        `json:"ref"`
+	To          string        `json:"to,omitempty"`
+	Mode        string        `json:"mode,omitempty"` // worktree | range | pr
+	PR          int           `json:"pr,omitempty"`
+	PRURL       string        `json:"prUrl,omitempty"`
+	Files       int           `json:"files"`
+	Routes      int           `json:"routes"`
+	Commits     []JCommit     `json:"commits,omitempty"`
+	CommitsMore int           `json:"commitsMore,omitempty"`
+	FileList    []JFileChange `json:"fileList,omitempty"`
+	FilesMore   int           `json:"filesMore,omitempty"`
+	Added       []JRouteKey   `json:"added,omitempty"`
+	Removed     []JRouteKey   `json:"removed,omitempty"`
+	Modified    []JRouteMod   `json:"modified,omitempty"`
+}
+
+// changeLabel names the comparison in one phrase for the console and exports.
+func changeLabel(c *JChange) string {
+	if c == nil {
+		return ""
+	}
+	if c.Mode == string(comparePR) && c.PR > 0 {
+		if c.To != "" {
+			return fmt.Sprintf("PR #%d (%s..%s)", c.PR, c.Ref, shortSha(c.To))
+		}
+		return fmt.Sprintf("PR #%d", c.PR)
+	}
+	if c.To != "" {
+		return c.Ref + ".." + c.To
+	}
+	return "vs " + c.Ref
+}
+
+func shortSha(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func commitCount(n int) string {
+	if n == 1 {
+		return "1 commit"
+	}
+	return fmt.Sprintf("%d commits", n)
 }
 
 // JSvc is one entry point of a multi-service module, with what it owns.
@@ -599,8 +652,12 @@ func report(w io.Writer, d JData, htmlPath, jsonPath, openapiPath, mdPath string
 		fmt.Fprintf(w, "  flows      %d truncated at depth/limit\n", g.Truncated)
 	}
 	if c := d.Change; c != nil {
-		fmt.Fprintf(w, "  base %s: %d added, %d removed, %d changed (%d files touched)\n",
-			c.Ref, len(c.Added), len(c.Removed), c.Routes, c.Files)
+		extra := ""
+		if n := len(c.Commits) + c.CommitsMore; n > 0 {
+			extra = ", " + commitCount(n)
+		}
+		fmt.Fprintf(w, "  changes %s: %d added, %d removed, %d changed (%d files touched%s)\n",
+			changeLabel(c), len(c.Added), len(c.Removed), c.Routes, c.Files, extra)
 	}
 	if htmlPath != "" {
 		fmt.Fprintf(w, "  written to %s\n", htmlPath)

@@ -66,12 +66,18 @@ func main() {
 }
 `)
 
-	changed, err := changedFiles(dir, "HEAD")
+	changed, files, more, err := changedFilesFor(dir, worktreeSpec("HEAD"))
 	if err != nil {
-		t.Fatalf("changedFiles: %v", err)
+		t.Fatalf("changedFilesFor: %v", err)
 	}
 	if !changed["main.go"] {
 		t.Fatalf("changed = %v, want main.go", changed)
+	}
+	if len(files) != 1 || files[0].Path != "main.go" || files[0].Status != "M" {
+		t.Fatalf("files = %+v, want main.go M", files)
+	}
+	if more != 0 {
+		t.Fatalf("filesMore = %d, want 0", more)
 	}
 
 	m, err := loadModule(dir)
@@ -79,12 +85,15 @@ func main() {
 		t.Fatal(err)
 	}
 	d := buildData(m, buildRoutes(m))
-	markChanges(&d, changed, "HEAD")
+	markChanges(&d, changed, worktreeSpec("HEAD"), files, more, nil, 0)
 	if d.Change == nil {
 		t.Fatal("no change summary")
 	}
 	if d.Change.Files != 1 || d.Change.Routes != 1 {
 		t.Fatalf("change = %+v, want 1 file / 1 route", d.Change)
+	}
+	if d.Change.Mode != "worktree" || d.Change.Ref != "HEAD" {
+		t.Fatalf("change = %+v, want a working-tree comparison against HEAD", d.Change)
 	}
 	if len(d.Routes) != 1 || !d.Routes[0].Chg {
 		t.Fatalf("route not marked changed: %+v", d.Routes)
@@ -94,22 +103,74 @@ func main() {
 	}
 }
 
-// A clean tree has nothing to mark, but the run still reports the ref.
+// A literal commit range reports only the files committed between the two
+// refs, not later uncommitted edits.
+func TestChangedFilesRange(t *testing.T) {
+	dir := changeFixture(t)
+	writeChangeFixture(t, dir, "main.go", `package changed
+
+import "net/http"
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("second"))
+}
+
+func main() {
+	http.HandleFunc("/ping", handler)
+}
+`)
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-qm", "second")
+
+	spec := rangeSpec("HEAD~1", "HEAD")
+	changed, files, more, err := changedFilesFor(dir, spec)
+	if err != nil {
+		t.Fatalf("changedFilesFor: %v", err)
+	}
+	if !changed["main.go"] || len(changed) != 1 {
+		t.Fatalf("changed = %v, want main.go only", changed)
+	}
+	if len(files) != 1 || files[0].Status != "M" || more != 0 {
+		t.Fatalf("files = %+v / %d, want main.go M", files, more)
+	}
+
+	commits, commitsMore, err := compareCommits(dir, spec)
+	if err != nil {
+		t.Fatalf("compareCommits: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Subject != "second" || commitsMore != 0 {
+		t.Fatalf("commits = %+v / %d, want the second commit", commits, commitsMore)
+	}
+
+	// An uncommitted edit is outside a commit range.
+	writeChangeFixture(t, dir, "main.go", "package changed\n")
+	changed, _, _, err = changedFilesFor(dir, rangeSpec("HEAD", "HEAD"))
+	if err != nil {
+		t.Fatalf("changedFilesFor (HEAD..HEAD): %v", err)
+	}
+	if len(changed) != 0 {
+		t.Fatalf("HEAD..HEAD changed = %v, want none", changed)
+	}
+}
+
 func TestChangedFilesCleanTree(t *testing.T) {
 	dir := changeFixture(t)
-	changed, err := changedFiles(dir, "HEAD")
+	changed, files, more, err := changedFilesFor(dir, worktreeSpec("HEAD"))
 	if err != nil {
-		t.Fatalf("changedFiles: %v", err)
+		t.Fatalf("changedFilesFor: %v", err)
 	}
 	if len(changed) != 0 {
 		t.Fatalf("changed = %v, want none", changed)
+	}
+	if len(files) != 0 || more != 0 {
+		t.Fatalf("files = %+v / %d, want none", files, more)
 	}
 	m, err := loadModule(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := buildData(m, buildRoutes(m))
-	markChanges(&d, changed, "HEAD")
+	markChanges(&d, changed, worktreeSpec("HEAD"), files, more, nil, 0)
 	if d.Change == nil || d.Change.Routes != 0 {
 		t.Fatalf("change = %+v, want zero routes", d.Change)
 	}
