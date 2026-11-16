@@ -104,7 +104,7 @@ func gitOutput(ctx context.Context, dir string, args ...string) ([]byte, error) 
 func routeKey(r JRoute) string { return r.M + " " + r.P + " " + r.Svc }
 
 func routeKeyOf(r JRoute) JRouteKey {
-	return JRouteKey{M: r.M, P: r.P, Svc: r.Svc}
+	return JRouteKey{M: r.M, P: r.P, Svc: r.Svc, F: r.F, L: r.L}
 }
 
 func lastStage(r JRoute) JStage {
@@ -172,7 +172,7 @@ func diffRoutes(base, head JData) *JChange {
 		}
 		if why := routeWhy(b, r); len(why) > 0 {
 			c.Modified = append(c.Modified, JRouteMod{
-				M: r.M, P: r.P, Svc: r.Svc, Why: why,
+				M: r.M, P: r.P, Svc: r.Svc, F: r.F, L: r.L, Why: why,
 			})
 		}
 	}
@@ -249,6 +249,8 @@ func applyCompareView(d *JData, root string, spec compareSpec, warn io.Writer) {
 	if err != nil {
 		fmt.Fprintf(warn, "base: %v (no file change data)\n", err)
 		changed, files, filesMore = map[string]bool{}, nil, 0
+	} else {
+		files = attachPatches(root, spec, files)
 	}
 	commits, commitsMore, err := compareCommits(root, spec)
 	if err != nil {

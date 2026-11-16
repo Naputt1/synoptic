@@ -8,7 +8,7 @@ import {
 import { useEffect, useState } from 'react'
 
 import { Shell } from '@/components/Shell'
-import { DataCtx } from '@/lib/context'
+import { DataCtx, DataUpdateCtx } from '@/lib/context'
 import { loadData } from '@/lib/data'
 import type { Data } from '@/lib/types'
 import { ChangesView } from '@/views/Changes'
@@ -49,7 +49,9 @@ function Root() {
 
   return (
     <DataCtx.Provider value={data}>
-      <Shell />
+      <DataUpdateCtx.Provider value={setData}>
+        <Shell />
+      </DataUpdateCtx.Provider>
     </DataCtx.Provider>
   )
 }

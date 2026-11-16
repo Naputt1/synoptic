@@ -44,6 +44,8 @@ type JRouteKey struct {
 	M   string `json:"m"`
 	P   string `json:"p"`
 	Svc string `json:"svc"`
+	F   string `json:"f,omitempty"`
+	L   int    `json:"l,omitempty"`
 }
 
 // JRouteMod is a route that kept its identity but changed inside.
@@ -51,6 +53,8 @@ type JRouteMod struct {
 	M   string   `json:"m"`
 	P   string   `json:"p"`
 	Svc string   `json:"svc"`
+	F   string   `json:"f,omitempty"`
+	L   int      `json:"l,omitempty"`
 	Why []string `json:"why"`
 }
 
@@ -62,10 +66,12 @@ type JCommit struct {
 	Subject string `json:"subject"`
 }
 
-// JFileChange is one changed .go file and its git status letter (M, A, D, R).
+// JFileChange is one changed .go file, its git status letter (M, A, D, R), and
+// the diff hunk text when the comparison could read it.
 type JFileChange struct {
 	Path   string `json:"path"`
 	Status string `json:"status"`
+	Patch  string `json:"patch,omitempty"`
 }
 
 // JChange describes a comparison: the two sides, how many files and commits it

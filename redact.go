@@ -9,6 +9,11 @@ func redact(d *JData) {
 		redactSteps(jf.Steps)
 		d.Flows[key] = jf
 	}
+	if d.Change != nil {
+		for i := range d.Change.FileList {
+			d.Change.FileList[i].Patch = ""
+		}
+	}
 	d.Redact = true
 }
 

@@ -73,7 +73,7 @@ export function RouterView() {
                   href="/changes"
                   className="text-acc ml-auto shrink-0 text-[10px] hover:underline"
                 >
-                  all changes ›
+                  open review ›
                 </AppLink>
               </div>
               {(removed.length > 0 || modified.length > 0) && (

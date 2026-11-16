@@ -93,6 +93,29 @@ func TestRedactClearsSourceAtEveryDepth(t *testing.T) {
 	}
 }
 
+func TestRedactClearsPatches(t *testing.T) {
+	d := redactedFixture()
+	d.Change = &JChange{
+		Ref:      "main",
+		Files:    1,
+		FileList: []JFileChange{{Path: "main.go", Status: "M", Patch: "raw-secret-patch"}},
+	}
+	redact(&d)
+	if patch := d.Change.FileList[0].Patch; patch != "" {
+		t.Fatalf("patch survived redaction: %q", patch)
+	}
+	if d.Change.FileList[0].Path != "main.go" || d.Change.FileList[0].Status != "M" {
+		t.Fatalf("file metadata lost: %+v", d.Change.FileList[0])
+	}
+	blob, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(blob), "raw-secret-patch") {
+		t.Fatalf("json leaks the patch: %s", blob)
+	}
+}
+
 func TestRedactKeepsDocsAndLines(t *testing.T) {
 	d := redactedFixture()
 	redact(&d)

@@ -140,15 +140,14 @@ export function Topbar({ onSearch }: { onSearch: () => void }) {
             />
           </div>
         )}
-        {change && (
-          <AppLink
-            href="/changes"
-            className="border-line text-faint hover:border-acc/45 hover:text-ink flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] transition-colors"
-            title="routes, commits and files in this comparison"
-          >
-            <b className="text-acc font-semibold">{changeTotal}</b> changes
-          </AppLink>
-        )}
+        <AppLink
+          href="/changes"
+          className="border-line text-faint hover:border-acc/45 hover:text-ink flex items-center gap-1 rounded-[3px] border px-1.5 py-0.5 text-[10px] transition-colors"
+          title="open the comparison review workspace"
+        >
+          <span className="text-acc font-semibold">compare</span>
+          {changeTotal > 0 && <b className="text-acc font-semibold">{changeTotal}</b>}
+        </AppLink>
         <Button variant="default" size="sm" onClick={onSearch}>
           <Search className="size-3" /> search
           <kbd className="border-line text-faint ml-1 rounded-[3px] border px-1 text-[9.5px]">

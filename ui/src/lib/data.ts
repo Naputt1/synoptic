@@ -2,6 +2,32 @@ import type { Data, FuncFlow, Route, RouteTiming, Stage } from './types'
 
 let cache: Data | null = null
 
+/** Read the static payload when the origin actually serves JSON, not the SPA shell. */
+async function readStatic(): Promise<Data | null> {
+  try {
+    const res = await fetch('./synoptic.json')
+    if (!res.ok) return null
+    const type = res.headers.get('content-type')?.toLowerCase() ?? ''
+    if (!type.includes('application/json')) return null
+    return (await res.json()) as Data
+  } catch {
+    return null
+  }
+}
+
+async function fetchInitial(): Promise<Data> {
+  const staticData = await readStatic()
+  if (staticData) return staticData
+
+  const res = await fetch('/api/initial')
+  if (!res.ok) throw new Error('no data: generate the page with the synoptic tool')
+  try {
+    return (await res.json()) as Data
+  } catch {
+    throw new Error('no data: generate the page with the synoptic tool')
+  }
+}
+
 export async function loadData(): Promise<Data> {
   if (cache) return cache
   const embedded = window.__SYNOPTIC__
@@ -14,9 +40,7 @@ export async function loadData(): Promise<Data> {
     cache = JSON.parse(node.textContent) as Data
     return cache
   }
-  const res = await fetch('./synoptic.json')
-  if (!res.ok) throw new Error('no data: generate the page with the synoptic tool')
-  cache = (await res.json()) as Data
+  cache = await fetchInitial()
   return cache
 }
 

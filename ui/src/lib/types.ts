@@ -332,6 +332,9 @@ export type ChangeRoute = {
   m: string
   p: string
   svc: string
+  /** the head-side file that declares the route */
+  f?: string
+  l?: number
 }
 
 /** A route that kept its identity but changed inside. */
@@ -347,10 +350,30 @@ export type ChangeCommit = {
   subject: string
 }
 
-/** One changed .go file and its git status letter. */
+/** One changed .go file, its git status letter, and its unified patch. */
 export type ChangeFile = {
   path: string
   status: string
+  patch?: string
+}
+
+/** A pull request the server can compare without a local checkout. */
+export type PrRef = {
+  number: number
+  title: string
+  headRefName: string
+  baseRefName: string
+  url: string
+}
+
+/** Refs and pull requests available from `synoptic serve`. */
+export type Refs = {
+  current?: string
+  branches: string[]
+  tags: string[]
+  commits: ChangeCommit[]
+  prs?: PrRef[]
+  prsError?: string
 }
 
 /** The comparison view: the two sides, commits, changed files, and route diff. */

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,83 @@ func main() {
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-qm", "base")
 	return dir
+}
+
+// A commit range attaches the unified diff for each changed .go file.
+func TestAttachPatchesRange(t *testing.T) {
+	dir := changeFixture(t)
+	writeChangeFixture(t, dir, "main.go", `package changed
+
+import "net/http"
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("changed"))
+}
+
+func main() {
+	http.HandleFunc("/ping", handler)
+}
+`)
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-qm", "change handler")
+
+	spec := rangeSpec("HEAD~1", "HEAD")
+	_, files, _, err := changedFilesFor(dir, spec)
+	if err != nil {
+		t.Fatalf("changedFilesFor: %v", err)
+	}
+	files = attachPatches(dir, spec, files)
+
+	if len(files) != 1 || files[0].Path != "main.go" {
+		t.Fatalf("files = %+v, want main.go", files)
+	}
+	patch := files[0].Patch
+	if patch == "" {
+		t.Fatal("main.go has no patch")
+	}
+	for _, want := range []string{"diff --git a/main.go b/main.go", "+++ b/main.go", `+	w.Write([]byte("changed"))`} {
+		if !strings.Contains(patch, want) {
+			t.Errorf("patch is missing %q:\n%s", want, patch)
+		}
+	}
+}
+
+// An untracked .go file is part of a working-tree comparison, with a
+// synthesized new-file patch.
+func TestAttachPatchesUntracked(t *testing.T) {
+	dir := changeFixture(t)
+	writeChangeFixture(t, dir, "extra.go", "package changed\n\nfunc extra() {}\n")
+
+	spec := worktreeSpec("HEAD")
+	changed, files, _, err := changedFilesFor(dir, spec)
+	if err != nil {
+		t.Fatalf("changedFilesFor: %v", err)
+	}
+	if !changed["extra.go"] {
+		t.Fatalf("changed = %v, want extra.go", changed)
+	}
+	files = attachPatches(dir, spec, files)
+	if len(files) != 1 || files[0].Path != "extra.go" || files[0].Status != "A" {
+		t.Fatalf("files = %+v, want extra.go A", files)
+	}
+	patch := files[0].Patch
+	for _, want := range []string{"--- /dev/null", "+++ b/extra.go", "+func extra() {}"} {
+		if !strings.Contains(patch, want) {
+			t.Errorf("patch is missing %q:\n%s", want, patch)
+		}
+	}
+}
+
+// A clean tree has no file list, and attachPatches is a no-op.
+func TestAttachPatchesCleanTree(t *testing.T) {
+	dir := changeFixture(t)
+	_, files, _, err := changedFilesFor(dir, worktreeSpec("HEAD"))
+	if err != nil {
+		t.Fatalf("changedFilesFor: %v", err)
+	}
+	if got := attachPatches(dir, worktreeSpec("HEAD"), files); len(got) != 0 {
+		t.Fatalf("patches = %+v, want none", got)
+	}
 }
 
 // A handler edited since the ref marks its route, and the counters agree.

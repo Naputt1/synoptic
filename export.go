@@ -116,7 +116,7 @@ func buildOpenAPI(d JData) ([]byte, error) {
 		XSynoptic: oaTop{
 			Repo:        d.Repo,
 			GeneratedBy: "synoptic",
-			Change:      d.Change,
+			Change:      openAPIChange(d.Change),
 			Diag: oaDiag{
 				Blind:   d.Diag.Unresolved,
 				Unknown: d.Diag.Unknown,
@@ -181,6 +181,21 @@ func buildOpenAPI(d JData) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+func openAPIChange(c *JChange) *JChange {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	if len(c.FileList) > 0 {
+		clone.FileList = make([]JFileChange, len(c.FileList))
+		copy(clone.FileList, c.FileList)
+		for i := range clone.FileList {
+			clone.FileList[i].Patch = ""
+		}
+	}
+	return &clone
 }
 
 type oaPathGroup struct {

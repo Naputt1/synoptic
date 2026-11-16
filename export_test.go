@@ -311,6 +311,41 @@ func markdownFixture() JData {
 	}
 }
 
+func TestOpenAPIOmitsPatch(t *testing.T) {
+	d := exportFixture()
+	d.Change = &JChange{
+		Ref:      "main",
+		Files:    1,
+		FileList: []JFileChange{{Path: "main.go", Status: "M", Patch: "PATCH_TEXT_MUST_NOT_LEAK"}},
+	}
+	blob, err := buildOpenAPI(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(blob), "PATCH_TEXT_MUST_NOT_LEAK") {
+		t.Fatalf("OpenAPI leaks the patch:\n%s", blob)
+	}
+	if patch := d.Change.FileList[0].Patch; patch == "" {
+		t.Fatal("buildOpenAPI mutated the input patch")
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(blob, &doc); err != nil {
+		t.Fatal(err)
+	}
+	change := obj(t, obj(t, doc["x-synoptic"])["change"])
+	files := arr(t, change["fileList"])
+	if len(files) != 1 {
+		t.Fatalf("fileList = %v, want one file", files)
+	}
+	file := obj(t, files[0])
+	if file["path"] != "main.go" || file["status"] != "M" {
+		t.Fatalf("file metadata = %v", file)
+	}
+	if _, ok := file["patch"]; ok {
+		t.Fatalf("file still has a patch key: %v", file)
+	}
+}
+
 func TestMarkdownChanges(t *testing.T) {
 	md := string(buildMarkdown(markdownFixture()))
 	for _, want := range []string{
