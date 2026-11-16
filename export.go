@@ -116,7 +116,7 @@ func buildOpenAPI(d JData) ([]byte, error) {
 		XSynoptic: oaTop{
 			Repo:        d.Repo,
 			GeneratedBy: "synoptic",
-			Change:      d.Change,
+			Change:      openAPIChange(d.Change),
 			Diag: oaDiag{
 				Blind:   d.Diag.Unresolved,
 				Unknown: d.Diag.Unknown,
@@ -181,6 +181,21 @@ func buildOpenAPI(d JData) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(doc, "", "  ")
+}
+
+func openAPIChange(c *JChange) *JChange {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	if len(c.FileList) > 0 {
+		clone.FileList = make([]JFileChange, len(c.FileList))
+		copy(clone.FileList, c.FileList)
+		for i := range clone.FileList {
+			clone.FileList[i].Patch = ""
+		}
+	}
+	return &clone
 }
 
 type oaPathGroup struct {
@@ -429,9 +444,13 @@ func buildMarkdown(d JData) []byte {
 	fmt.Fprintf(&b, "%d routes · generated from source; evidence only, unresolved calls are not guessed\n\n", len(d.Routes))
 
 	if c := d.Change; c != nil {
-		fmt.Fprintf(&b, "## Changes vs %s\n\n", c.Ref)
-		fmt.Fprintf(&b, "%d added · %d removed · %d modified · %d files touched\n\n",
+		fmt.Fprintf(&b, "## Changes %s\n\n", changeLabel(c))
+		summary := fmt.Sprintf("%d added · %d removed · %d modified · %d files touched",
 			len(c.Added), len(c.Removed), len(c.Modified), c.Files)
+		if n := len(c.Commits) + c.CommitsMore; n > 0 {
+			summary += " · " + commitCount(n)
+		}
+		b.WriteString(summary + "\n\n")
 		if len(c.Added) == 0 && len(c.Removed) == 0 && len(c.Modified) == 0 {
 			b.WriteString("No route changes.\n\n")
 		}
@@ -450,6 +469,30 @@ func buildMarkdown(d JData) []byte {
 				fmt.Fprintf(&b, "| %s | %s | %s |\n", cell(m.M), cell(m.P), cell(strings.Join(m.Why, ", ")))
 			}
 			b.WriteString("\n")
+		}
+		if len(c.Commits) > 0 || c.CommitsMore > 0 {
+			fmt.Fprintf(&b, "<details><summary>Commits (%d)</summary>\n\n", len(c.Commits)+c.CommitsMore)
+			for _, cm := range c.Commits {
+				date := cm.Date
+				if len(date) >= 10 {
+					date = date[:10]
+				}
+				fmt.Fprintf(&b, "- `%s` %s — %s, %s\n", shortSha(cm.Sha), cell(cm.Subject), cell(cm.Author), date)
+			}
+			if c.CommitsMore > 0 {
+				fmt.Fprintf(&b, "- … %d more\n", c.CommitsMore)
+			}
+			b.WriteString("\n</details>\n\n")
+		}
+		if len(c.FileList) > 0 || c.FilesMore > 0 {
+			fmt.Fprintf(&b, "<details><summary>Changed files (%d)</summary>\n\n", len(c.FileList)+c.FilesMore)
+			for _, f := range c.FileList {
+				fmt.Fprintf(&b, "- `%s` %s\n", cell(f.Status), cell(f.Path))
+			}
+			if c.FilesMore > 0 {
+				fmt.Fprintf(&b, "- … %d more\n", c.FilesMore)
+			}
+			b.WriteString("\n</details>\n\n")
 		}
 		b.WriteString("<details><summary>All routes</summary>\n\n")
 	}

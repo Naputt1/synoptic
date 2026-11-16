@@ -8,9 +8,10 @@ import {
 import { useEffect, useState } from 'react'
 
 import { Shell } from '@/components/Shell'
-import { DataCtx } from '@/lib/context'
+import { DataCtx, DataUpdateCtx } from '@/lib/context'
 import { loadData } from '@/lib/data'
 import type { Data } from '@/lib/types'
+import { ChangesView } from '@/views/Changes'
 import { DiagnosticsView } from '@/views/Diagnostics'
 import { FlowView } from '@/views/Flow'
 import { FnView } from '@/views/Fn'
@@ -48,7 +49,9 @@ function Root() {
 
   return (
     <DataCtx.Provider value={data}>
-      <Shell />
+      <DataUpdateCtx.Provider value={setData}>
+        <Shell />
+      </DataUpdateCtx.Provider>
     </DataCtx.Provider>
   )
 }
@@ -81,6 +84,11 @@ const diagRoute = createRoute({
   path: '/diag',
   component: DiagnosticsView,
 })
+const changesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/changes',
+  component: ChangesView,
+})
 const rpcRoute = createRoute({ getParentRoute: () => rootRoute, path: '/rpc', component: RPCView })
 const rpcMethodRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -96,6 +104,7 @@ const routeTree = rootRoute.addChildren([
   fnRoute,
   typeRoute,
   diagRoute,
+  changesRoute,
   rpcRoute,
   rpcMethodRoute,
 ])

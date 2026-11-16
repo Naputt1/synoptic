@@ -13,7 +13,7 @@ The UI uses Bun 1.4: `bun run check` runs typecheck, lint and the format check; 
 
 `ui/dist/index.html` is a Bun build artifact, not a committed file, and `main.go` embeds it with `//go:embed`. It must exist before `go build` or `go run`, which is why a fresh clone runs the UI build first. Without it the build fails, or the binary carries an empty page.
 
-Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-openapi <file>` (write the proven route surface as OpenAPI 3.1 JSON; `-` writes stdout), `-md <file>` (write the route inventory as Markdown, for a PR comment; `-` writes stdout), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (analyze the tree at a git ref and diff its routes against the working tree: added, removed and modified, plus file-touch marks; the base is read-only and AST-only, and is best-effort), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
+Flags: `-root` (default `.`), `-out` (default `<root>/synoptic.html`), `-json <file>` (also write the raw data as json; the report names the path), `-html` (default `true`; `-html=false` writes no page and the report says `no HTML written (-html=false)`), `-openapi <file>` (write the proven route surface as OpenAPI 3.1 JSON; `-` writes stdout), `-md <file>` (write the route inventory as Markdown, for a PR comment; `-` writes stdout), `-trace <file>` (overlay timings from a span export), `-typed` (default `false`; type-check the repo to resolve calls the syntax pass misses — slower, adds `golang.org/x/tools`, and the repo must resolve its own imports), `-base <ref>` (analyze the tree at a git ref and diff its routes against the working tree: added, removed and modified, plus file-touch marks; the base is read-only and AST-only, and is best-effort), `-to <ref>` (with `-base`, compare two committed trees instead of the working tree; both sides are read-only worktrees), `-pr <n|url>` (compare a GitHub pull request by number or URL; resolves its base and head with `gh`, fetches a missing head, and uses their merge-base), `-serve` (serve the interactive comparison UI and its API on the loopback interface; starts on the working tree and lets the page choose refs or a PR), `-addr <host:port>` (default `127.0.0.1:8099`; `-serve` only, loopback only), `-no-source` (omit raw source from the page, keeping docs, files and line numbers), `-version` (print `synoptic <version>` and exit).
 
 The default analysis path uses only the Go standard library. `-typed` is the one
 third-party Go dependency, `golang.org/x/tools`, and only that mode calls it.
@@ -76,7 +76,9 @@ jobs:
 `root` is a subdirectory of the workspace, so a monorepo points at the service
 it wants to report on. `base` defaults to `origin/$GITHUB_BASE_REF` on a pull
 request (fetched by the action) and to `HEAD~1` otherwise; the chosen ref is
-printed in the step log.
+printed in the step log. Locally, `-pr <number|url>` resolves the base and head
+with `gh` and compares their merge-base, so you do not have to pick the base ref
+by hand.
 
 | input | default | meaning |
 | --- | --- | --- |
@@ -299,56 +301,143 @@ data:
 - **flows** — the truncated count and a link to every baked flow whose expansion
   stopped at the depth or flow cap.
 
-## Route diff (`-base`)
+## Route diff and comparisons (`-base`, `-to`, `-pr`)
 
-`-base main` analyzes the tree at `main` and diffs its routes against the working
-tree:
+A comparison has two sides: the base (the old view) and the head (the new one).
+`-base` alone keeps the original behavior: the base tree is compared against the
+working tree.
 
 ```bash
 go run . -root . -base main -out synoptic.html
 ```
 
-The base tree is materialized with `git worktree add --detach` in a temp
-directory and analyzed with the same loader and route builders as the working
-tree (services, streams and docs included, AST only — `-typed` never runs there).
-If `-root` is a subdirectory of the repo, the analysis points at the matching
-subdirectory of the worktree. Routes match on `method + path + service`:
+`-to` makes the head a committed tree, so no uncommitted edit can leak in:
 
-- **added** — present now, absent at `<ref>`: marked `new` and `chg`.
-- **removed** — present at `<ref>`, absent now: listed under `removed`.
+```bash
+go run . -root . -base v1.2.0 -to v1.3.0
+```
+
+`-pr` resolves a GitHub pull request with `gh` and compares the PR head against
+the merge-base of its base and head. The merge-base keeps base-branch drift out
+of the diff, so a route added on `main` after the fork is not reported as
+removed by the PR.
+
+```bash
+go run . -root . -pr 123
+go run . -root . -pr https://github.com/owner/repo/pull/123
+```
+
+`-pr` needs the GitHub CLI and its authentication. If the PR head is missing
+locally, it fetches `refs/pull/<n>/head`; if the base commit is missing, it
+fetches the base branch. On a shallow clone where `merge-base` cannot be
+computed it warns and compares against the base tip. `-base`/`-to` and `-pr`
+are mutually exclusive, and `-to` requires `-base`.
+
+The base tree (and, for `-to` or `-pr`, the head tree) is materialized with
+`git worktree add --detach` in a temp directory and analyzed with the same loader
+and route builders as the working tree (services, streams and docs included, AST
+only — `-typed` never runs there). If `-root` is a subdirectory of the repo, the
+analysis points at the matching subdirectory of the worktree. Routes match on
+`method + path + service`:
+
+- **added** — present in the head, absent in the base: marked `new` and `chg`.
+- **removed** — present in the base, absent in the head: listed under `removed`.
 - **modified** — same identity, different internals: `why` names `handler`,
-  `middleware` or `stream`. Working-tree stages that differ from the base chain
-  at the same position get `chg`.
+  `middleware` or `stream`. Head stages that differ from the base chain at the
+  same position get `chg`.
 
-`change` carries the counts and the three lists:
+`change` carries the two sides, the counts, the three route lists, and the
+commits and `.go` files between them:
 
 ```json
 "change": {
   "ref": "origin/main",
+  "to": "a1b2c3d",
+  "mode": "pr",
+  "pr": 123,
+  "prUrl": "https://github.com/owner/repo/pull/123",
   "files": 3,
   "routes": 2,
+  "commits": [
+    {"sha": "a1b2c3d...", "author": "Ada", "date": "2026-11-16T...", "subject": "add /new"}
+  ],
+  "commitsMore": 0,
+  "fileList": [{"path": "api/routes.go", "status": "M"}],
+  "filesMore": 0,
   "added": [{"m": "GET", "p": "/new", "svc": ""}],
   "removed": [{"m": "POST", "p": "/old", "svc": ""}],
   "modified": [{"m": "GET", "p": "/x", "svc": "", "why": ["middleware", "handler"]}]
 }
 ```
 
-`routes` is the number of working-tree routes that are new or modified; `chg`
-stays the general badge. File-touch marks are kept alongside the diff: a route
-or stage whose file changed since `<ref>` still gets `chg` even when the route
-itself is unchanged. The file-touch part is a merge-base
-`git diff --name-only <ref>...HEAD -- '*.go'`, so a base branch that moved after
-the fork does not light up every file it touched; uncommitted edits count, which
-is what makes `-base HEAD` describe the working tree.
+`mode` is `worktree`, `range` or `pr`. `to` and `mode` are omitted on old
+reports, where `mode` means `worktree`. `routes` is the number of head routes
+that are new or modified; `chg` stays the general badge. Commits are capped at
+100 and changed files at 200, with `commitsMore`/`filesMore` carrying the
+remaining count. Commit lists skip merge commits. Commit dates come from git, so
+two runs over the same refs are byte-identical.
 
-The router view summarizes the diff (`vs <ref>: N added · N removed · N changed`)
-and lists removed routes and modified reasons under **what changed**. Removed
-routes have no working-tree box, so that list is the only place they appear.
+Each `fileList` entry also carries the file's unified `patch` (capped at 48 KB)
+for the code panel. `-no-source` strips patches along with the rest of the
+source, and the OpenAPI export never includes them.
 
-The feature is best-effort: missing git, an unknown ref, no `go.mod` at the base,
-or a timeout prints a warning and keeps the file-touch view. It never fails the
-run. The temp worktree is removed with `git worktree remove --force`, with
-`os.RemoveAll` as a fallback.
+File-touch marks are kept alongside the diff: a route or stage whose file
+changed still gets `chg` even when the route itself is unchanged. In worktree
+mode the file diff is a merge-base `git diff --name-only <ref>...HEAD -- '*.go'`,
+so a base branch that moved after the fork does not light up every file it
+touched; uncommitted edits count, which is what makes `-base HEAD` describe the
+working tree. Range mode uses the literal `-base`/`-to` pair, so commits and
+renames outside the pair are not guessed at.
+
+The router view summarizes the diff (`N added · N removed · N changed`) next to
+the comparison label (`vs <ref>` for the working tree, `<from>..<to>` for a
+range, or `PR #<n>` for a pull request) and lists removed routes and modified
+reasons under **what changed**. The topbar links to **changes** (`#/changes`),
+the review workspace: route changes, commits and changed files on the left, the
+route diff in the middle, and the selected file's patch on the right. Removed
+routes have no head box, so the changes page and the router list are the only
+places they appear.
+
+The comparison is best-effort once the head tree is available: an unknown base
+ref, no `go.mod` in the base tree, missing git for the base diff, or a timeout
+prints a `base:` warning and keeps the file-touch view. A head tree that cannot
+be materialized — including a missing `gh` for `-pr` — fails at startup with the
+reason, as do invalid flag combinations. The temp worktrees are removed with
+`git worktree remove --force`, with `os.RemoveAll` as a fallback.
+
+## Interactive review (`-serve`)
+
+The static page can describe a comparison, but choosing refs and reading code
+needs a server:
+
+```bash
+go run . -serve -root .
+# synoptic serve: http://127.0.0.1:8099
+```
+
+`-serve` starts on the working tree and opens the same page against a small JSON
+API. **changes** becomes a review workspace: pick a base branch, tag or recent
+commit and an optional head, or switch to **pull request** and enter a number or
+URL. The page fills its left rail with route changes, commits and touched `.go`
+files; clicking a route or file loads that file's unified patch on the right,
+with line numbers and add/remove colors. A route row also carries the head
+`file:line` and an **open route** link.
+
+The comparison is part of the URL, so a review is shareable and reloads itself:
+
+```text
+#/changes?base=main&to=HEAD
+#/changes?base=v1.2.0&to=v1.3.0
+#/changes?pr=123
+```
+
+`-addr <host:port>` moves the listener; only loopback addresses are accepted,
+and there is no authentication, so do not bind it to a network interface.
+`-no-source` still applies: patches are stripped and the panel says source is
+unavailable. A `-serve` run starts on the working tree and ignores
+`-base`/`-to`/`-pr`; choose the comparison in the page, or open a deep link.
+Static exports and the GitHub Action are unchanged; without a server the changes
+page stays read-only and shows the data baked into the page.
 
 ## Exports (`-openapi`, `-md`)
 
@@ -377,14 +466,18 @@ The OpenAPI document is `3.1.0` with `info.title` = `<repo> API`, and
 `info.version` = the build version (`dev` unless set with ldflags). It omits
 `servers` because only the deployment knows them. Every operation carries
 `x-synoptic` with the handler `{name,file,line}`, middleware, service and
-`auth`; the top-level `x-synoptic` carries the repo, the `-base` change view
-when present, and the blind/unknown/skipped diagnostic counts. Output is
+`auth`; the top-level `x-synoptic` carries the repo, the comparison
+(`-base`, `-to` or `-pr`) when present, and the blind/unknown/skipped diagnostic
+counts. Output is
 deterministic: paths and methods are sorted, JSON is indented with two spaces,
 and operations get a unique sanitized `operationId`.
 
-The Markdown starts with the route count, then `## Changes vs <ref>` when
-`-base` produced a diff (added, removed and modified tables), then the full
-route table. With a change section the table sits inside
+The Markdown starts with the route count, then a Changes section when a
+comparison produced a diff (`## Changes vs <ref>` in worktree mode,
+`## Changes <base>..<to>` for a range, and
+`## Changes PR #<n> (<base>..<head>)` for a pull request). It has added,
+removed and modified tables, plus collapsed commits and changed-file lists,
+then the full route table. With a change section the table sits inside
 `<details><summary>All routes</summary>` so a PR comment stays short. The
 footer repeats the blind-spot counts. There are no timestamps, so two runs over
 the same tree are byte-identical.
@@ -497,16 +590,16 @@ fog logs <pid> -s ui --tail 40
 fog kill <pid>
 ```
 
-- **`dev`** — regenerates `ui/public/synoptic.json` from `$SYN_REPO` (default
-  `~/git/Resm`), then runs Vite with HMR on a random free port. The generator runs
-  inside the same service, so the data file always exists before the server answers.
+- **`dev`** — builds the UI and runs `-serve` for `$SYN_REPO` (default
+  `~/git/Resm`) on a random free port. The comparison controls and code patches
+  are computed by the server on demand, so there is no data file to regenerate.
 - **`page`** — builds the UI, renders `out/index.html` for `$SYN_REPO`, and serves
   `out/` over HTTP, so every generated page is reachable next to it.
 
 Point either script at another service with `SYN_REPO=/path/to/repo fog dev -d`.
 Ports are randomised per instance (`ports.dev`, `ports.page`), and both use `tcp`
-health checks — an `http` check against Vite reported `unhealthy` while the server
-answered 200, so the probe is deliberately shallow.
+health checks — the probe is deliberately shallow. `dev` rebuilds `ui/dist`
+before it starts, so the embedded page matches the checkout.
 
 ## Documentation panel
 

@@ -33,7 +33,7 @@
         {
           "name": "ui",
           "path": ".",
-          "cmd": "ROOT=$SYN_REPO; [ -n \"$ROOT\" ] || ROOT=$HOME/git/Resm; go run . -root \"$ROOT\" -json ui/public/synoptic.json -html=false && (cd ui && bun run dev -- --host 0.0.0.0 --port ${ports.dev} --strictPort)",
+          "cmd": "ROOT=$SYN_REPO; [ -n \"$ROOT\" ] || ROOT=$HOME/git/Resm; (cd ui && bun run build) && go run . -serve -root \"$ROOT\" -addr 127.0.0.1:${ports.dev}",
           "health_check": {
             "kind": "tcp",
             "target": "127.0.0.1:${ports.dev}",

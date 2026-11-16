@@ -217,6 +217,57 @@ func setup(r *Router) {
 	}
 }
 
+// A two-commit range analyzes the head commit and reports the routes that
+// changed between the commits, with the commit metadata attached.
+func TestCompareRangeEndToEnd(t *testing.T) {
+	dir := changeFixture(t)
+	writeChangeFixture(t, dir, "main.go", `package changed
+
+import "net/http"
+
+func handler(w http.ResponseWriter, r *http.Request) {}
+
+func main() {
+	http.HandleFunc("/new", handler)
+}
+`)
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-qm", "replace ping with new")
+
+	headRoot, cleanup, err := materializeRef(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("materializeRef: %v", err)
+	}
+	defer cleanup()
+	m, err := loadModule(headRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := buildData(m, buildRoutes(m))
+
+	var warn bytes.Buffer
+	applyCompareView(&d, dir, rangeSpec("HEAD~1", "HEAD"), &warn)
+
+	if d.Change == nil {
+		t.Fatalf("no change summary: %s", warn.String())
+	}
+	if d.Change.Mode != "range" || d.Change.Ref != "HEAD~1" || d.Change.To != "HEAD" {
+		t.Fatalf("change = %+v, want range HEAD~1..HEAD", d.Change)
+	}
+	if len(d.Change.Added) != 1 || d.Change.Added[0].P != "/new" {
+		t.Fatalf("added = %+v, want /new", d.Change.Added)
+	}
+	if len(d.Change.Removed) != 1 || d.Change.Removed[0].P != "/ping" {
+		t.Fatalf("removed = %+v, want /ping", d.Change.Removed)
+	}
+	if d.Change.Files != 1 || len(d.Change.FileList) != 1 || d.Change.FileList[0].Path != "main.go" {
+		t.Fatalf("files = %+v, want main.go", d.Change)
+	}
+	if len(d.Change.Commits) != 1 || d.Change.Commits[0].Subject != "replace ping with new" {
+		t.Fatalf("commits = %+v, want the range commit", d.Change.Commits)
+	}
+}
+
 // A root that is not a git work tree warns and keeps the file-touch view; the
 // route data still describes the current tree.
 func TestNoGitKeepsFileView(t *testing.T) {
@@ -239,7 +290,7 @@ func main() {
 	}
 	d := buildData(m, buildRoutes(m))
 	var warn bytes.Buffer
-	applyBaseView(&d, dir, "HEAD", &warn)
+	applyCompareView(&d, dir, worktreeSpec("HEAD"), &warn)
 
 	if len(d.Routes) != 1 {
 		t.Fatalf("routes = %d, want the head route", len(d.Routes))
@@ -247,8 +298,8 @@ func main() {
 	if d.Routes[0].Chg {
 		t.Fatal("route marked changed without a base")
 	}
-	if d.Change != nil {
-		t.Fatalf("change = %+v, want none outside git", d.Change)
+	if d.Change == nil || d.Change.Routes != 0 || d.Change.Files != 0 {
+		t.Fatalf("change = %+v, want a summary with no files or routes", d.Change)
 	}
 	if !strings.Contains(warn.String(), "base:") {
 		t.Fatalf("warning = %q, want a base warning", warn.String())

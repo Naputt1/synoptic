@@ -9,6 +9,10 @@ export const useData = () => {
   return d
 }
 
+/** Replaces the current report after a live comparison. */
+export const DataUpdateCtx = createContext<(data: Data) => void>(() => {})
+export const useDataUpdate = () => useContext(DataUpdateCtx)
+
 /** Selected service of a multi-entry module; '' means every service. */
 export const SvcCtx = createContext<{ svc: string; setSvc: (v: string) => void }>({
   svc: '',
